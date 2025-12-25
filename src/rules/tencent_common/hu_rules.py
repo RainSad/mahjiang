@@ -15,7 +15,61 @@ class TencentHuRules:
             是否可以胡牌
         """
         # 检查基本条件：是否有将牌（对子）和四组面子
-        return self._check_basic_hu_condition(player, card)
+        if not self._check_basic_hu_condition(player, card):
+            return False
+        
+        # 检查是否满足至少一种番型
+        if not self._check_has_at_least_one_fan(player, card):
+            return False
+        
+        return True
+    
+    def _check_has_at_least_one_fan(self, player, card) -> bool:
+        """检查是否至少有一种番型
+        
+        Args:
+            player: 玩家对象
+            card: 胡牌的牌
+        
+        Returns:
+            是否至少有一种番型
+        """
+        # 抢杠胡、杠上炮、杠上开花属于番型
+        if self._is_qiang_gang_hu(player, card):
+            return True
+        if self._is_gang_shang_pao(player, card):
+            return True
+        if self._is_gang_shang_kai_hua(player, card):
+            return True
+        
+        # 其他番型检查
+        return self._has_any_fan_type(player, card)
+    
+    def _is_qiang_gang_hu(self, player, card) -> bool:
+        """判断是否是抢杠胡"""
+        # 抢杠胡：胡别人补杠的那张牌
+        # 需要游戏状态支持，暂时返回False
+        return False
+    
+    def _is_gang_shang_pao(self, player, card) -> bool:
+        """判断是否是杠上炮"""
+        # 杠上炮：胡别人杠牌后打出的那张牌
+        # 需要游戏状态支持，暂时返回False
+        return False
+    
+    def _is_gang_shang_kai_hua(self, player, card) -> bool:
+        """判断是否是杠上开花"""
+        # 杠上开花：杠牌/补花后摸牌胡牌
+        # 需要游戏状态支持，暂时返回False
+        return False
+    
+    def _has_any_fan_type(self, player, card) -> bool:
+        """检查是否有其他番型"""
+        # 这里需要调用计分规则中的番数计算逻辑
+        # 暂时实现一些基本番型检查
+        from src.rules.tencent_common.score_rules import TencentScoreRules
+        score_rules = TencentScoreRules(self.rule)
+        return score_rules._calculate_fans(player, card) > 0
     
     def _check_basic_hu_condition(self, player, card) -> bool:
         """检查基本胡牌条件：将牌+四组面子"""

@@ -46,7 +46,7 @@ class TencentCommonRule(BaseRule):
     
     def create_initial_deck(self) -> list:
         """创建腾讯大众麻将初始牌组"""
-        # 实现创建136张牌的逻辑
+        # 实现创建144张牌的逻辑
         from src.core.data.card import Card
         deck = []
         
@@ -67,5 +67,10 @@ class TencentCommonRule(BaseRule):
             for rank in ['中', '发', '白']:
                 for _ in range(4):
                     deck.append(Card(suit, rank))
+        
+        # 花牌
+        for suit in ['花']:
+            for rank in ['梅', '兰', '竹', '菊', '春', '夏', '秋', '冬']:
+                deck.append(Card(suit, rank))
         
         return deck
