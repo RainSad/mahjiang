@@ -1,0 +1,12 @@
+# 核心依赖
+pytest>=6.0.0
+numpy>=1.20.0
+mypy>=0.812
+
+# 可选依赖（UI框架）
+PyQt5>=5.15.0
+# tkinter  # Python标准库
+
+# 性能优化（可选）
+numba>=0.54.0
+# cython>=0.29.0
