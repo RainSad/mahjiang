@@ -59,397 +59,38 @@ mahjiang/
 ├── config/                    # 配置文件
 ├── requirements.txt           # 依赖列表
 └── main.py                    # 程序入口
-```
 
-## 三、核心模块设计
 
-### 1. 核心数据结构
+### 1. 用牌规则
+- 实现情况 ：✅ 正确实现了144张牌的组成（108张序数牌、28张字牌、8张花牌）
+### 2. 开局规则
+- 换牌功能 ：❌ 未实现（规则要求发完手牌后可选择至多5张牌与系统换牌）
+- 跟庄功能 ：❌ 未实现（规则要求庄家打出第一张牌后，若这一巡闲家都打出相同牌且无吃碰杠，庄家需立即赔付豆子）
+### 3. 行牌规则
+- 碰、杠、吃上家牌 ：✅ 基本实现
+- 补花功能 ：❌ 仅在注释中提到，未实现完整逻辑
+- 补牌功能 ：❌ 未实现（规则要求补花/杠牌后，可从牌山随机3张牌选1张放入手牌）
+- 杠开、杠上开花、杠上炮 ：❌ 有定义但仅返回False，未实现具体逻辑
+- 连杠功能 ：❌ 未实现（规则要求一个操作回合内连续杠牌/补花且无其他操作，连杠次数越多，杠开收益越高、杠上炮输分也越高）
+- 接杠功能 ：❌ 未实现（规则要求杠牌后打出的牌被其他玩家杠，连杠次数由该玩家继承）
+- 庄家输赢×2倍 ：❌ 未实现
+- 场风 ：⚠️ 有相关代码但需确保默认是东风场
+- 门风 ：⚠️ 有相关代码但需确保正确实现
+### 4. 胡牌规则
+- 至少1种番型才能吃胡 ：✅ 已实现
+- 鸡胡只能自摸 ：❌ 未实现（规则要求鸡胡只能自摸）
+- 特殊胡牌番型 ：❌ 抢杠胡、杠上炮、杠上开花有定义但仅返回False，未实现具体逻辑
+### 5. 计分规则
+- 番型累加 ：✅ 已实现
+- 翻倍 ：⚠️ 有杠上开花等翻倍番型但未完整实现
+- 底分 ：⚠️ 代码中使用基础分1，未看到底分配置（规则要求得分计算公式：（番型1 + 番型2 +…）×翻倍×底分）
+### 6. 特殊规则
+- 三滩承包 ：❌ 未实现（规则要求若玩家给另一个玩家吃/碰/杠3次，需承包该玩家所有赢分，仅在土豪场生效）
 
-#### Card类（src/core/data/card.py）
-```python
-class Card:
-    def __init__(self, suit: str, rank: str):
-        """牌类定义
-        
-        Args:
-            suit: 花色（万、筒、条、风、箭）
-            rank: 点数（1-9或东南西北中发白）
-        """
-        self.suit = suit
-        self.rank = rank
-        self.id = f"{suit}{rank}"  # 唯一标识
-        self.is_visible = False    # 是否可见（用于暗杠）
-        
-    def __repr__(self):
-        return self.id
-        
-    def __eq__(self, other):
-        return self.id == other.id if other else False
-        
-    def __hash__(self):
-        return hash(self.id)
-```
-
-#### Player类（src/core/data/player.py）
-```python
-class Player:
-    def __init__(self, name: str, is_ai: bool = True):
-        """玩家类定义
-        
-        Args:
-            name: 玩家名称
-            is_ai: 是否为AI玩家
-        """
-        self.name = name
-        self.is_ai = is_ai
-        self.hand = []              # 手牌
-        self.melds = []             # 吃碰杠的牌
-        self.score = 0              # 分数
-        self.position = None        # 位置：东、南、西、北
-        self.is_dealer = False      # 是否是庄家
-        self.drawn_card = None      # 当前摸到的牌
-        self.ai_strategy = None     # AI策略
-        self.previous_player = None # 上家
-        self.next_player = None     # 下家
-```
-
-#### GameState类（src/core/data/game_state.py）
-```python
-class GameState:
-    def __init__(self, rule_name: str = "tencent_common"):
-        """游戏状态类定义
-        
-        Args:
-            rule_name: 使用的规则名称
-        """
-        self.rule_name = rule_name
-        self.deck = []              # 剩余牌墙
-        self.discard_pile = []      # 已打出的牌
-        self.players = []           # 玩家列表
-        self.current_player = None  # 当前回合玩家
-        self.last_discarded_card = None  # 上一张打出的牌
-        self.game_stage = "init"    # 游戏阶段：init/playing/ended
-        self.winner = None          # 赢家
-        self.round_number = 1       # 局数
-        self.wind = "东"            # 场风
-        self.rule = None            # 当前规则实例
-```
-
-#### Action类（src/core/data/action.py）
-```python
-class Action:
-    def __init__(self, action_type: str, card: 'Card' = None, from_player=None):
-        """操作类定义
-        
-        Args:
-            action_type: 操作类型（draw/discard/chow/pong/kong/hu）
-            card: 涉及的牌
-            from_player: 来源玩家
-        """
-        self.type = action_type
-        self.card = card
-        self.from_player = from_player
-        self.timestamp = None       # 操作时间戳
-        
-    def __repr__(self):
-        return f"Action(type={self.type}, card={self.card}, from={self.from_player.name if self.from_player else 'None'})"
-```
-
-### 2. 规则系统设计
-
-#### BaseRule基类（src/rules/base_rule.py）
-```python
-class BaseRule:
-    """规则基类，定义规则接口"""
-    
-    def __init__(self):
-        # 通用规则配置
-        self.max_players = 4
-        self.tiles_count = 136
-        self.starting_tiles = 13
-        self.dealer_extra_tile = True
-        self.allow_chow = True
-        self.allow_pong = True
-        self.allow_kong = True
-        self.allow_self_hu = True
-        self.allow_other_hu = True
-    
-    def can_chow(self, player: 'Player', card: 'Card', from_player) -> bool:
-        """判断是否可以吃牌"""
-        raise NotImplementedError
-    
-    def can_pong(self, player: 'Player', card: 'Card', from_player) -> bool:
-        """判断是否可以碰牌"""
-        raise NotImplementedError
-    
-    def can_kong(self, player: 'Player', card: 'Card', from_player) -> bool:
-        """判断是否可以杠牌"""
-        raise NotImplementedError
-    
-    def can_hu(self, player: 'Player', card: 'Card') -> bool:
-        """判断是否可以胡牌"""
-        raise NotImplementedError
-    
-    def calculate_score(self, player: 'Player', winning_card: 'Card') -> int:
-        """计算胡牌分数"""
-        raise NotImplementedError
-    
-    def get_valid_actions(self, player: 'Player', game_state: 'GameState') -> list:
-        """获取当前玩家的有效操作"""
-        raise NotImplementedError
-    
-    def create_initial_deck(self) -> list:
-        """创建初始牌组"""
-        raise NotImplementedError
-```
-
-#### 腾讯大众麻将规则实现（src/rules/tencent_common/rule.py）
-```python
-from src.rules.base_rule import BaseRule
-from src.rules.tencent_common.hu_rules import TencentHuRules
-from src.rules.tencent_common.action_rules import TencentActionRules
-from src.rules.tencent_common.score_rules import TencentScoreRules
-
-class TencentCommonRule(BaseRule):
-    """腾讯大众麻将规则实现"""
-    
-    def __init__(self):
-        super().__init__()
-        # 腾讯大众麻将特定规则配置
-        self.allow_chow = True  # 允许吃牌
-        self.allow_pong = True  # 允许碰牌
-        self.allow_kong = True  # 允许杠牌
-        self.max_fans = 10      # 最大番数
-        self.mandatory_discard = True  # 必须有一张牌可以打出
-        
-        # 加载子规则
-        self.hu_rules = TencentHuRules(self)
-        self.action_rules = TencentActionRules(self)
-        self.score_rules = TencentScoreRules(self)
-    
-    def can_chow(self, player: 'Player', card: 'Card', from_player) -> bool:
-        """腾讯大众麻将吃牌规则"""
-        return self.action_rules.can_chow(player, card, from_player)
-    
-    def can_pong(self, player: 'Player', card: 'Card', from_player) -> bool:
-        """腾讯大众麻将碰牌规则"""
-        return self.action_rules.can_pong(player, card, from_player)
-    
-    def can_kong(self, player: 'Player', card: 'Card', from_player) -> bool:
-        """腾讯大众麻将杠牌规则"""
-        return self.action_rules.can_kong(player, card, from_player)
-    
-    def can_hu(self, player: 'Player', card: 'Card') -> bool:
-        """腾讯大众麻将胡牌规则"""
-        return self.hu_rules.can_hu(player, card)
-    
-    def calculate_score(self, player: 'Player', winning_card: 'Card') -> int:
-        """腾讯大众麻将计分规则"""
-        return self.score_rules.calculate_score(player, winning_card)
-    
-    def get_valid_actions(self, player: 'Player', game_state: 'GameState') -> list:
-        """获取当前玩家的有效操作"""
-        return self.action_rules.get_valid_actions(player, game_state)
-    
-    def create_initial_deck(self) -> list:
-        """创建腾讯大众麻将初始牌组"""
-        # 实现创建136张牌的逻辑
-        from src.core.data.card import Card
-        deck = []
-        
-        # 序数牌（万、筒、条）
-        for suit in ['万', '筒', '条']:
-            for rank in range(1, 10):
-                for _ in range(4):
-                    deck.append(Card(suit, str(rank)))
-        
-        # 风牌
-        for suit in ['风']:
-            for rank in ['东', '南', '西', '北']:
-                for _ in range(4):
-                    deck.append(Card(suit, rank))
-        
-        # 箭牌
-        for suit in ['箭']:
-            for rank in ['中', '发', '白']:
-                for _ in range(4):
-                    deck.append(Card(suit, rank))
-        
-        return deck
-```
-
-### 3. AI决策系统设计
-
-#### 危险牌预测模块（src/ai/evaluation/risk_evaluator.py）
-```python
-class RiskEvaluator:
-    """危险牌预测模块"""
-    
-    def __init__(self, rule: 'BaseRule'):
-        self.rule = rule
-        
-    def evaluate_card_risk(self, card: 'Card', player: 'Player', game_state: 'GameState') -> float:
-        """评估打出某张牌的风险
-        
-        Returns:
-            风险值（0-1，越高越危险）
-        """
-        # 1. 计算牌的出现概率
-        card_probability = self._calculate_card_probability(card, game_state)
-        
-        # 2. 评估对手听牌可能性
-        opponent_hu_probability = self._estimate_opponent_hu_probability(player, game_state)
-        
-        # 3. 综合计算风险值
-        risk_value = card_probability * opponent_hu_probability * self._get_card_value_risk(card)
-        
-        return risk_value
-    
-    def _calculate_card_probability(self, card: 'Card', game_state: 'GameState') -> float:
-        """计算某张牌在剩余牌中的概率"""
-        # 实现概率计算逻辑
-        total_remaining = len(game_state.deck)
-        if total_remaining == 0:
-            return 0.0
-            
-        # 统计已经出现的该牌数量
-        appeared_count = 0
-        for p in game_state.players:
-            appeared_count += sum(1 for c in p.hand if c == card)
-            appeared_count += sum(1 for meld in p.melds for c in meld if c == card)
-        
-        for c in game_state.discard_pile:
-            if c == card:
-                appeared_count += 1
-        
-        remaining_count = 4 - appeared_count
-        return remaining_count / total_remaining
-    
-    def _estimate_opponent_hu_probability(self, player: 'Player', game_state: 'GameState') -> float:
-        """评估对手听牌的可能性"""
-        # 实现对手听牌概率估计逻辑
-        # 基于对手已经打出的牌、吃碰杠情况等进行估计
-        probability = 0.0
-        # 简化实现：根据牌局阶段估计概率
-        total_tiles = self.rule.tiles_count
-        remaining_tiles = len(game_state.deck)
-        progress = (total_tiles - remaining_tiles) / total_tiles
-        
-        # 牌局越靠后，对手听牌概率越高
-        probability = min(progress * 2, 1.0)
-        
-        return probability
-    
-    def _get_card_value_risk(self, card: 'Card') -> float:
-        """获取牌的价值风险系数"""
-        # 实现牌价值风险计算逻辑
-        # 字牌的价值风险通常高于序数牌
-        if card.suit in ['风', '箭']:
-            return 1.5
-        return 1.0
-```
-
-## 四、核心工作流程
-
-### 1. 游戏初始化流程
-```python
-def init_game(rule_name: str, players_config: list) -> 'GameState':
-    """初始化游戏
-    
-    Args:
-        rule_name: 使用的规则名称
-        players_config: 玩家配置列表
-    
-    Returns:
-        初始化后的游戏状态
-    """
-    # 1. 创建游戏状态
-    game_state = GameState(rule_name)
-    
-    # 2. 加载规则
-    rule = load_rule(rule_name)
-    game_state.rule = rule
-    
-    # 3. 创建玩家
-    from src.core.data.player import Player
-    for config in players_config:
-        player = Player(config["name"], config["is_ai"])
-        if config.get("ai_strategy"):
-            player.ai_strategy = load_ai_strategy(config["ai_strategy"])
-        game_state.players.append(player)
-    
-    # 4. 设置玩家位置和邻居关系
-    positions = ['东', '南', '西', '北']
-    for i, player in enumerate(game_state.players):
-        player.position = positions[i]
-        player.is_dealer = (i == 0)  # 第一个玩家为庄家
-        player.previous_player = game_state.players[(i - 1) % len(game_state.players)]
-        player.next_player = game_state.players[(i + 1) % len(game_state.players)]
-    
-    # 5. 洗牌和发牌
-    from src.core.logic.deck_manager import shuffle_and_deal
-    shuffle_and_deal(game_state)
-    
-    # 6. 设置游戏阶段为进行中
-    game_state.current_player = game_state.players[0]  # 庄家先出牌
-    game_state.game_stage = "playing"
-    
-    return game_state
-```
-
-### 2. 回合处理流程
-```python
-def process_turn(game_state: 'GameState') -> 'Action':
-    """处理单个玩家的回合
-    
-    Returns:
-        玩家执行的操作
-    """
-    current_player = game_state.current_player
-    rule = game_state.rule
-    
-    # 1. 摸牌
-    from src.core.logic.deck_manager import draw_card
-    drawn_card = draw_card(game_state)
-    current_player.drawn_card = drawn_card
-    
-    # 2. 检查是否可以自摸胡牌
-    if rule.can_hu(current_player, drawn_card):
-        action = Action("hu", drawn_card)
-        from src.core.logic.turn_handler import execute_action
-        execute_action(action, game_state)
-        return action
-    
-    # 3. 获取有效操作列表
-    valid_actions = rule.get_valid_actions(current_player, game_state)
-    
-    # 4. AI决策或玩家输入
-    if current_player.is_ai:
-        from src.ai.decision import AI_Decision
-        ai_decision = AI_Decision(current_player.ai_strategy, rule)
-        action = ai_decision.make_decision(current_player, game_state, valid_actions)
-    else:
-        from src.interface.game_api import get_player_input
-        action = get_player_input(current_player, game_state, valid_actions)
-    
-    # 5. 执行操作
-    from src.core.logic.turn_handler import execute_action
-    execute_action(action, game_state)
-    
-    # 6. 检查是否有其他玩家可以胡牌（如果是打牌操作）
-    if action.type == "discard" and rule.allow_other_hu:
-        for player in game_state.players:
-            if player != current_player and rule.can_hu(player, action.card):
-                hu_action = Action("hu", action.card, current_player)
-                execute_action(hu_action, game_state)
-                return hu_action
-    
-    # 7. 切换到下一个玩家
-    from src.core.logic.turn_handler import switch_player
-    switch_player(game_state)
-    
-    return action
-```
+- 优先实现基础的行牌规则和胡牌逻辑
+- 完善计分规则，确保庄家翻倍等核心功能
+- 逐步实现特殊规则如连杠、三滩承包等
+- 最后实现开局规则中的换牌和跟庄功能
 
 ## 五、技术选型
 
@@ -537,23 +178,92 @@ python main.py --rule tencent_common --players ai,ai,ai,ai
 python main.py --config config/tencent_common.json
 ```
 
-### 配置文件示例
-```json
-{
-  "rule_name": "tencent_common",
-  "players": [
-    {"name": "AI1", "is_ai": true, "ai_strategy": "simple"},
-    {"name": "AI2", "is_ai": true, "ai_strategy": "advanced"},
-    {"name": "AI3", "is_ai": true, "ai_strategy": "simple"},
-    {"name": "AI4", "is_ai": true, "ai_strategy": "advanced"}
-  ],
-  "log_level": "INFO",
-  "output_format": "text"
-}
-```
 
 ## 十一、总结
 
 本架构设计采用了模块化、可扩展的设计理念，将麻将游戏的核心功能分解为多个独立模块，便于维护和扩展。重点实现了规则系统的灵活性，支持多种麻将规则的扩展；AI决策系统采用分层设计，支持不同水平的AI策略；危险牌预测模块结合多种因素进行风险评估，提高AI的决策质量。
 
 通过清晰的目录结构和接口设计，确保了代码的可读性和可维护性，便于后续功能的扩展和优化。
+
+
+
+
+规则分类,具体规则内容,
+用牌规则,总计144张牌，包含：1. 序数牌：1-9万、1-9筒、1-9条（每种4张，共108张）2. 字牌：东南西北中发白（每种4张，共28张）3. 花牌：梅兰竹菊春夏秋冬（每种1张，共8张）,
+开局规则,1. 换牌：发完手牌后，玩家可选择至多5张牌与系统换牌2. 跟庄：庄家打出第一张牌后，若这一巡闲家都打出相同牌且无吃碰杠，庄家需立即赔付豆子,
+行牌规则,1. 可碰、杠，吃上家的牌2. 补花：摸到花牌可择机自行打出并补花3. 补牌：补花/杠牌后，可从牌山随机3张牌选1张放入手牌4. 杠开：补花/杠牌后补牌自摸，达成杠上开花5. 连杠：一个操作回合内连续杠牌/补花且无其他操作，连杠次数越多，杠开收益越高、杠上炮输分也越高6. 接杠：杠牌后打出的牌被其他玩家杠，连杠次数由该玩家继承7. 庄家：每局坐东方位的为庄家，庄家输赢×2倍8. 场风：非好友房均为东风场，东风的刻子为场风刻9. 门风：自己所坐方位即为门风（如庄家东风位，门风为东），对应门风的刻子为门风刻,
+胡牌规则,1. 必须满足至少1种番型才能吃胡，鸡胡只能自摸2. 补花和庄赢不属于番型3. 抢杠胡、杠上炮、杠上开花属于番型,
+计分规则,得分计算公式：（番型1 + 番型2 +…）×翻倍×底分,
+特殊规则,三滩承包：若玩家给另一个玩家吃/碰/杠3次，需承包该玩家所有赢分（仅在土豪场生效）
+
+番数,番型名称,简要说明,
+88番,大四喜,4副风刻（杠）组成的胡牌。,
+88番,大三元,胡牌中含有中、发、白3副刻子。,
+88番,十三幺,由3种序数牌的一、九牌，七种字牌及其中一对作将组成的胡牌。,
+88番,天胡,庄家在发完牌后直接胡牌。,
+88番,地胡,非庄家在第一轮摸牌后立即自摸胡牌。,
+88番,大七星,由七种字牌组成的七对。,
+88番,九莲宝灯,一种花色的1112345678999牌型，见同花色任意一张序数牌即可胡牌。,
+88番,十八罗汉,胡牌时手中有4副杠牌。,
+88番,连七对,由同一花色序数牌组成的序数相连的7个对子。,
+88番,绿一色,由2、3、4、6、8条及发财组成的胡牌。,
+64番,小四喜,胡牌时有风牌的3副刻子及1对将牌。,
+64番,小三元,胡牌时有箭牌的2副刻子及1对将牌。,
+64番,字一色,由字牌的刻子（杠）、将组成的胡牌。,
+64番,四暗刻,4个暗刻（暗杠）组成的胡牌。,
+64番,一色双龙会,一种花色的两个老少副，5为将牌。,
+64番,清幺九,只由序数牌一、九组成的胡牌。,
+64番,人胡,非庄家发完牌后第一轮就吃胡。,
+48番,四同顺,一种花色4副序数相同的顺子。,
+48番,四连刻,一种花色4副依次递增一位数的刻子。,
+36番,一色四步高,一种花色4副依次递增一位数或二位数的顺子。,
+36番,十二金钗,胡牌时手中有3副杠牌。,
+36番,混幺九,由序数牌一、九和字牌组成的胡牌。,
+32番,七对,由7个对子组成的胡牌。,
+32番,清一色,只由一种花色序数牌组成的胡牌。,
+32番,全双刻,胡牌时手牌都是双数的序数牌。,
+32番,全大,胡牌时手牌都是七、八、九的序数牌。,
+32番,全中,胡牌时手牌都是四、五、六的序数牌。,
+32番,全小,胡牌时手牌都是一、二、三的序数牌。,
+32番,三连刻,一种花色3副依次递增一位数字的刻子。,
+32番,三同顺,一种花色3副序数相同的顺子。,
+24番,清龙,一种花色1-9相连的序数牌。,
+24番,一色三步高,一种花色3副依次递增一位数或二位数的顺子。,
+24番,三同刻,3个序数相同的刻子（杠）。,
+24番,三暗刻,胡牌时包含3个暗刻。,
+24番,七星不靠,有7个单张的东南西北中发白，加3种花色按147、258、369组合的牌。,
+16番,推不倒,由牌面图形无上下区别的牌组成的胡牌。,
+16番,纯带幺九,胡牌时每副牌、将牌都包含一或九的序数牌。,
+16番,三风刻,胡牌时包含3副风刻。,
+16番,全单,胡牌时手牌都是单数的序数牌。,
+12番,五门齐,胡牌时3种序数牌、风、箭牌齐全。,
+12番,碰碰胡,由4副刻子（或杠）、将牌组成的胡牌。,
+12番,双箭刻,胡牌时有2副箭刻（或杠）。,
+12番,花龙,3种花色的3副顺子连接成1-9的序数牌。,
+12番,组合龙,包含3种花色的147、258、369的9张序数牌。,
+12番,全不靠,由单张3种花色的147、258、369序数牌及字牌中任意14张组成。,
+12番,三色三同顺,胡牌时有3种花色3副序数相同的顺子。,
+8番,金钩钓,牌被吃碰杠放倒后只剩1张牌单钓将胡牌。,
+8番,带幺九,胡牌时每副牌、将牌都有一、九序数牌或字牌。,
+8番,混一色,由一种花色序数牌+字牌组成的胡牌。,
+4番,断幺九,胡牌中无1、9序数牌及字牌。,
+4番,一般高,由一种花色2副相同的顺子组成。,
+4番,喜相逢,2种花色2副序数相同的顺子。,
+4番,连六,胡牌时有6张同一花色序数相连的牌组成2副顺子。,
+4番,老少副,一种花色的123、789两副顺子。,
+4番,箭刻,手中有一副中、发、白的箭刻。,
+4番,场风刻,手中有一副东风的场风刻子。,
+4番,门风刻,手中有一副与本门风相同的风刻。,
+4番,暗杠,自己摸到4张相同的牌开杠。,
+4番,四归一,包含4张相同的牌胡牌（不能杠出）。,
+4番,门清,胡牌时无吃碰和明杠。,
+4番,双暗刻,胡牌时有2个暗刻。,
+4番,双同刻,胡牌时有2副序数相同的刻子。,
+2番,四花,胡牌时补花数量≥4张。,
+2番,明杠,自己有暗刻，碰别人打出的相同牌开杠；或抓进与碰的明刻相同的牌开杠。,
+1番,自摸,自己抓进牌成胡牌。,
+×2倍,杠上开花,杠牌/补花后摸牌胡牌。,
+×2倍,妙手回春,自摸牌墙最后一张牌胡牌（不计自摸）。,
+×2倍,海底捞月,胡打出的最后一张牌。,
+×2倍,抢杠胡,胡别人补杠的那张牌。,
+×2倍,杠上炮,胡别人杠牌后打出的那张牌。

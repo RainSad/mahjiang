@@ -22,6 +22,10 @@ class TencentHuRules:
         if not self._check_has_at_least_one_fan(player, card):
             return False
         
+        # 检查鸡胡只能自摸
+        if self._is_ji_hu(player, card) and card != player.drawn_card:
+            return False
+        
         return True
     
     def _check_has_at_least_one_fan(self, player, card) -> bool:
@@ -46,21 +50,44 @@ class TencentHuRules:
         return self._has_any_fan_type(player, card)
     
     def _is_qiang_gang_hu(self, player, card) -> bool:
-        """判断是否是抢杠胡"""
-        # 抢杠胡：胡别人补杠的那张牌
-        # 需要游戏状态支持，暂时返回False
+        """判断是否是抢杠胡
+        
+        抢杠胡：胡别人补杠的那张牌
+        """
+        # 检查上一个玩家的操作是否是补杠
+        from src.core.data.game_state import GameState
+        if hasattr(player, 'game_state'):
+            game_state = player.game_state
+            if game_state.last_discarded_card:
+                last_player = game_state.last_discarded_card.from_player
+                if hasattr(last_player, 'last_action') and last_player.last_action == '补杠':
+                    return True
         return False
     
     def _is_gang_shang_pao(self, player, card) -> bool:
-        """判断是否是杠上炮"""
-        # 杠上炮：胡别人杠牌后打出的那张牌
-        # 需要游戏状态支持，暂时返回False
+        """判断是否是杠上炮
+        
+        杠上炮：胡别人杠牌后打出的那张牌
+        """
+        # 检查上一个玩家的操作是否是杠牌
+        from src.core.data.game_state import GameState
+        if hasattr(player, 'game_state'):
+            game_state = player.game_state
+            if game_state.last_discarded_card:
+                last_player = game_state.last_discarded_card.from_player
+                if hasattr(last_player, 'last_action') and last_player.last_action in ['明杠', '暗杠', '补杠']:
+                    return True
         return False
     
     def _is_gang_shang_kai_hua(self, player, card) -> bool:
-        """判断是否是杠上开花"""
-        # 杠上开花：杠牌/补花后摸牌胡牌
-        # 需要游戏状态支持，暂时返回False
+        """判断是否是杠上开花
+        
+        杠上开花：杠牌/补花后摸牌胡牌
+        """
+        # 检查玩家的上一次操作是否是杠牌或补花
+        if hasattr(player, 'last_action') and player.last_action in ['明杠', '暗杠', '补杠', '补花', '杠牌']:
+            # 检查当前胡牌的牌是否是杠牌或补花后摸到的牌
+            return player.drawn_card == card
         return False
     
     def _has_any_fan_type(self, player, card) -> bool:
@@ -70,6 +97,25 @@ class TencentHuRules:
         from src.rules.tencent_common.score_rules import TencentScoreRules
         score_rules = TencentScoreRules(self.rule)
         return score_rules._calculate_fans(player, card) > 0
+    
+    def _is_ji_hu(self, player, card) -> bool:
+        """判断是否是鸡胡
+        
+        鸡胡：没有特殊番型，只有基本番数的胡牌
+        """
+        from src.rules.tencent_common.score_rules import TencentScoreRules
+        score_rules = TencentScoreRules(self.rule)
+        
+        # 计算番数
+        fans = score_rules._calculate_fans(player, card)
+        
+        # 鸡胡的情况：
+        # 1. 如果是自摸，番数为1（只有自摸的1番）
+        # 2. 如果不是自摸，番数为0（没有任何番型）
+        if card == player.drawn_card:
+            return fans == 1
+        else:
+            return fans == 0
     
     def _check_basic_hu_condition(self, player, card) -> bool:
         """检查基本胡牌条件：将牌+四组面子"""
@@ -129,15 +175,18 @@ class TencentHuRules:
             if has_next1 and has_next2:
                 temp = hand.copy()
                 # 移除组成顺子的三张牌
-                del temp[0]
-                for i in range(len(temp)):
-                    if temp[i].suit == hand[0].suit and int(temp[i].rank) == needed_rank1:
-                        del temp[i]
-                        break
-                for i in range(len(temp)):
-                    if temp[i].suit == hand[0].suit and int(temp[i].rank) == needed_rank2:
-                        del temp[i]
-                        break
+                # 先找到需要删除的三张牌的索引
+                to_remove = []
+                for i, card in enumerate(temp):
+                    if len(to_remove) < 3:
+                        if (card.suit == hand[0].suit and 
+                            int(card.rank) in [current_rank, needed_rank1, needed_rank2]):
+                            to_remove.append(i)
+                
+                # 按逆序删除，避免索引变化问题
+                for i in sorted(to_remove, reverse=True):
+                    del temp[i]
+                
                 if self._check_melds(temp):
                     return True
         

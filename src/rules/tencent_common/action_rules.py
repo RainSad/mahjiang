@@ -66,9 +66,21 @@ class TencentActionRules:
         
         return False
     
+    def can_flower(self, player) -> bool:
+        """判断是否可以补花
+        
+        条件：
+        1. 手牌中有花牌
+        """
+        return any(card.suit == '花' for card in player.hand)
+    
     def get_valid_actions(self, player, game_state) -> list:
         """获取当前玩家的有效操作"""
         valid_actions = []
+        
+        # 检查是否可以补花
+        if self.can_flower(player):
+            valid_actions.append("flower")
         
         # 摸牌后的基本操作：胡（如果可以）或打牌
         valid_actions.append("discard")

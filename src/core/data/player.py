@@ -17,3 +17,8 @@ class Player:
         self.ai_strategy = None     # AI策略
         self.previous_player = None # 上家
         self.next_player = None     # 下家
+        self.last_action = None     # 上一次操作
+        self.consecutive_gang_count = 0  # 连续杠次数
+        self.changed_flower_count = 0    # 补花次数
+        self.is_ji_hu = False       # 是否是鸡胡
+        self.ji_hu_from = None      # 鸡胡来源（自摸/点炮）
