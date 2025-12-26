@@ -32,7 +32,7 @@ class TurnHandler:
         
         # 4. AI决策或玩家输入
         if current_player.is_ai:
-            from src.ai.decision import AI_Decision
+            from src.ai.strategy.decision import AI_Decision
             ai_decision = AI_Decision(current_player.ai_strategy, rule)
             action = ai_decision.make_decision(current_player, game_state, valid_actions)
         else:
@@ -43,11 +43,11 @@ class TurnHandler:
         TurnHandler.execute_action(action, current_player, game_state)
 
         # 补花/杠后需要继续当前玩家的回合（补牌后再决策）
-        if action.type in ["kong", "flower"]:
+        if action and action.type in ["kong", "flower"]:
             return TurnHandler.process_turn(game_state)
         
         # 6. 检查是否有其他玩家可以胡牌（如果是打牌操作）
-        if action.type == "discard" and rule.allow_other_hu:
+        if action and action.type == "discard" and rule.allow_other_hu:
             for player in game_state.players:
                 if player != current_player and rule.can_hu(player, action.card):
                     hu_action = Action("hu", action.card, current_player)

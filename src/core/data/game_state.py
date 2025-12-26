@@ -1,3 +1,7 @@
+# 方法1：使用 Optional 类型
+from typing import Optional
+from src.rules.base_rule import BaseRule
+
 class GameState:
     def __init__(self, rule_name: str = "tencent_common"):
         """游戏状态类定义
@@ -15,4 +19,4 @@ class GameState:
         self.winner = None          # 赢家
         self.round_number = 1       # 局数
         self.wind = "东"            # 场风
-        self.rule = None            # 当前规则实例
+        self.rule: Optional[BaseRule] = None  # 当前规则实例
