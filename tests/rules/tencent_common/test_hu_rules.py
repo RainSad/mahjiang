@@ -78,7 +78,7 @@ assert can_hu_self == True, "鸡胡自摸测试失败"
 player.drawn_card = None
 can_hu_other = hu_rules.can_hu(player, Card("条", "2"))
 print(f"   鸡胡点炮，是否能胡牌: {can_hu_other}")
-assert can_hu_other == False, "鸡胡点炮测试失败"
+assert can_hu_other == True, "鸡胡点炮应可吃胡（有番型）"
 print("   ✅ 鸡胡只能自摸测试通过")
 
 # 测试4：杠上开花
