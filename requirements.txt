@@ -5,7 +5,7 @@ mypy>=0.812
 
 # 可选依赖（UI框架）
 PyQt5>=5.15.0
-# tkinter  # Python标准库
+tkinter  # Python标准库
 
 # 性能优化（可选）
 numba>=0.54.0
