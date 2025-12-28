@@ -1,5 +1,16 @@
+PYQT_AVAILABLE = True  # PyQt imports will raise if missing; keep a flag for potential guard
+
 from PyQt5.QtCore import QTimer, pyqtSignal, pyqtSlot
-from PyQt5.QtWidgets import QApplication, QLabel, QMainWindow, QPushButton, QTextEdit, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import (
+    QApplication,
+    QLabel,
+    QMainWindow,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+    QHBoxLayout,
+)
 
 from src.core.logic.turn_handler import TurnHandler
 from src.core.logic.deck_manager import DeckManager
@@ -27,6 +38,12 @@ class MainWindow(QMainWindow):
 
         self.status_label = QLabel("等待开始")
         self.deck_label = QLabel("")
+        self.players_view = QTextEdit()
+        self.players_view.setReadOnly(True)
+        self.hand_container = QWidget()
+        self.hand_layout = QHBoxLayout(self.hand_container)
+        self.actions_container = QWidget()
+        self.actions_layout = QHBoxLayout(self.actions_container)
         self.start_button = QPushButton("开始游戏")
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
@@ -34,6 +51,9 @@ class MainWindow(QMainWindow):
         self._layout.addWidget(self.start_button)
         self._layout.addWidget(self.status_label)
         self._layout.addWidget(self.deck_label)
+        self._layout.addWidget(self.players_view)
+        self._layout.addWidget(self.hand_container)
+        self._layout.addWidget(self.actions_container)
         self._layout.addWidget(self.log_view)
 
         # Signals/slots
@@ -47,6 +67,8 @@ class MainWindow(QMainWindow):
         self._timer.timeout.connect(self._tick)
 
         self._refresh_labels()
+        self._refresh_players()
+        self._render_hand_and_actions()
 
     @pyqtSlot()
     def start_game(self):
@@ -79,6 +101,7 @@ class MainWindow(QMainWindow):
                 self._handle_empty_deck()
                 return
         self.status_label.setText(f"等待 {current.name} 选择动作…")
+        self._render_hand_and_actions()
         self._timer.stop()
 
     @pyqtSlot(str, object)
@@ -93,6 +116,7 @@ class MainWindow(QMainWindow):
             TurnHandler.switch_player(self.game_state)
         self.log_updated.emit(f"{player.name}: {action.type} {action.card if action.card else ''}")
         self.game_updated.emit()
+        self._render_hand_and_actions()
         if not self._timer.isActive():
             self._timer.start()
 
@@ -119,10 +143,59 @@ class MainWindow(QMainWindow):
         current = self.game_state.current_player
         self.status_label.setText(f"当前: {current.name} ({current.position}) | 分:{current.score}")
         self.deck_label.setText(f"牌墙余量: {deck_remaining}")
+        self._refresh_players()
 
     @pyqtSlot(str)
     def _append_log(self, message: str):
         self.log_view.append(message)
+
+    def _refresh_players(self):
+        """Render a text snapshot of all players (position/score/que)."""
+        lines = []
+        for p in self.game_state.players:
+            que = getattr(p, "que_men", "-")
+            lines.append(f"{p.position} {p.name} 分:{p.score} 缺:{que} 手牌:{len(p.hand)} 副露:{len(getattr(p, 'melds', []))}")
+        self.players_view.setPlainText("\n".join(lines))
+
+    def _render_hand_and_actions(self):
+        """Rebuild hand buttons for the current player and action buttons for available actions."""
+        # clear old widgets
+        while self.hand_layout.count():
+            item = self.hand_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        while self.actions_layout.count():
+            item = self.actions_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        player = self.game_state.current_player
+        valid = self.game_state.rule.get_valid_actions(player, self.game_state)
+
+        # render hand buttons (primarily for discard)
+        for card in sorted(player.hand, key=str):
+            btn = QPushButton(str(card))
+            btn.clicked.connect(lambda _=None, c=card: self.handle_player_action("discard", c))
+            self.hand_layout.addWidget(btn)
+
+        # action buttons for non-discard actions
+        def add_action_btn(text, action_type):
+            btn = QPushButton(text)
+            btn.clicked.connect(lambda _=None: self.handle_player_action(action_type))
+            self.actions_layout.addWidget(btn)
+
+        if "hu" in valid:
+            add_action_btn("胡", "hu")
+        if "pong" in valid:
+            add_action_btn("碰", "pong")
+        if "kong" in valid:
+            add_action_btn("杠", "kong")
+        if "flower" in valid:
+            add_action_btn("补花", "flower")
+        if "must_discard_que" in valid:
+            add_action_btn("必须出缺门", "discard")
 
 
 def run_pyqt_ui_game(rule_name: str = "tencent_common"):
