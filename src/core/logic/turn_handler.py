@@ -80,6 +80,7 @@ class TurnHandler:
                 action.from_player = player
                 DeckManager.discard_card(game_state, action)
             player.last_action = "出牌"
+            player.drawn_card = None
             player.consecutive_gang_count = 0
         elif action.type == "chow":
             # 吃牌：使用上家弃牌与手牌组成顺子

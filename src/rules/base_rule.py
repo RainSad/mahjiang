@@ -1,3 +1,10 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.core.data.player import Player
+    from src.core.data.card import Card
+    from src.core.data.game_state import GameState
+
 class BaseRule:
     """规则基类，定义规则接口"""
     
