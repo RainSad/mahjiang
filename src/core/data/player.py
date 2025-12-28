@@ -22,3 +22,15 @@ class Player:
         self.changed_flower_count = 0    # 补花次数
         self.is_ji_hu = False       # 是否是鸡胡
         self.ji_hu_from = None      # 鸡胡来源（自摸/点炮）
+        self.last_gang_gain = 0     # 最近一次杠获得的分数（用于呼叫转移）
+        self.is_tian_hu = False     # 天胡标志
+        self.is_di_hu = False       # 地胡标志
+        self.is_tian_hu_candidate = False   # 天胡候选（庄家首圈）
+        self.is_di_hu_candidate = False     # 地胡候选（闲家首圈摸牌）
+        self.que_men = None         # 定缺花色（万/筒/条）
+        self.que_men_locked = False # 定缺是否已锁定（不可更改）
+        self.discarded_cards = []   # 已打出的牌（用于检查天命花猪）
+        self.total_gang_gain = 0    # 本局从杠牌获得的总分
+        self.total_gang_loss = 0    # 本局因杠牌损失的总分
+        self.gang_events = []       # 本局每次杠的收益事件明细：[{type, gain, contributors:{player:amount}}]
+        self.last_gang_event = None # 最近一次杠事件（用于呼叫转移）

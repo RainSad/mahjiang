@@ -20,11 +20,31 @@ class TurnHandler:
         # 1. 摸牌
         drawn_card = DeckManager.draw_card(game_state)
         current_player.drawn_card = drawn_card
+        # 若牌墙为空，仍允许继续本回合（可能发生点炮等），结算由UI或外部流程触发
+        
+        # 标记天胡/地胡条件
+        if getattr(game_state, 'first_turn', False):
+            if current_player.is_dealer:
+                current_player.is_tian_hu_candidate = True
+            else:
+                current_player.is_di_hu_candidate = True
+            game_state.first_turn = False
         
         # 2. 检查是否可以自摸胡牌
         if rule.can_hu(current_player, drawn_card):
+            # 确认天胡/地胡
+            if getattr(current_player, 'is_tian_hu_candidate', False):
+                current_player.is_tian_hu = True
+            elif getattr(current_player, 'is_di_hu_candidate', False):
+                current_player.is_di_hu = True
+            current_player.is_tian_hu_candidate = False
+            current_player.is_di_hu_candidate = False
+            
             action = Action("hu", drawn_card)
             TurnHandler.execute_action(action, current_player, game_state)
+            # 血流模式不结束游戏，继续从胡家下家开始
+            if getattr(rule, "allow_multiple_hu", False):
+                game_state.current_player = current_player.next_player
             return action
         
         # 3. 获取有效操作列表
@@ -34,7 +54,16 @@ class TurnHandler:
         if current_player.is_ai:
             from src.ai.strategy.decision import AI_Decision
             ai_decision = AI_Decision(current_player.ai_strategy, rule)
-            action = ai_decision.make_decision(current_player, game_state, valid_actions)
+            # 定缺必须先出缺门牌
+            if "must_discard_que" in valid_actions:
+                que_men = getattr(current_player, "que_men", None)
+                que_card = next((c for c in current_player.hand if c.suit == que_men), None)
+                if que_card:
+                    action = Action("discard", que_card, from_player=current_player)
+                else:
+                    action = ai_decision.make_decision(current_player, game_state, valid_actions)
+            else:
+                action = ai_decision.make_decision(current_player, game_state, valid_actions)
         else:
             from src.interface.game_api import get_player_input
             action = get_player_input(current_player, game_state, valid_actions)
@@ -48,11 +77,32 @@ class TurnHandler:
         
         # 6. 检查是否有其他玩家可以胡牌（如果是打牌操作）
         if action and action.type == "discard" and rule.allow_other_hu:
-            for player in game_state.players:
-                if player != current_player and rule.can_hu(player, action.card):
-                    hu_action = Action("hu", action.card, current_player)
-                    TurnHandler.execute_action(hu_action, player, game_state)
+            multi = getattr(rule, "allow_multiple_hu", False)
+            if multi:
+                hu_players = []
+                for player in game_state.players:
+                    if player != current_player and rule.can_hu(player, action.card):
+                        hu_action = Action("hu", action.card, current_player)
+                        TurnHandler.execute_action(hu_action, player, game_state)
+                        hu_players.append(player)
+                if hu_players:
+                    # 丢弃的牌被吃胡，移除弃牌并从最后一家胡的下家继续
+                    if game_state.discard_pile and game_state.discard_pile[-1] == action.card:
+                        game_state.discard_pile.pop()
+                    game_state.last_discarded_card = None
+                    if hasattr(rule, "handle_call_transfer"):
+                        for hp in hu_players:
+                            rule.handle_call_transfer(hp, current_player)
+                    game_state.current_player = hu_players[-1].next_player
                     return hu_action
+            else:
+                for player in game_state.players:
+                    if player != current_player and rule.can_hu(player, action.card):
+                        hu_action = Action("hu", action.card, current_player)
+                        TurnHandler.execute_action(hu_action, player, game_state)
+                        if hasattr(rule, "handle_call_transfer"):
+                            rule.handle_call_transfer(player, current_player)
+                        return hu_action
         
         # 7. 切换到下一个玩家
         TurnHandler.switch_player(game_state)
@@ -79,6 +129,10 @@ class TurnHandler:
                 player.hand.remove(action.card)
                 action.from_player = player
                 DeckManager.discard_card(game_state, action)
+                # 记录已打出的牌（用于天命花猪检查）
+                if not hasattr(player, 'discarded_cards'):
+                    player.discarded_cards = []
+                player.discarded_cards.append(action.card)
             player.last_action = "出牌"
             player.drawn_card = None
             player.consecutive_gang_count = 0
@@ -146,6 +200,8 @@ class TurnHandler:
                         meld.type = "补杠"
                         player.last_action = "补杠"
                         player.consecutive_gang_count = max(player.consecutive_gang_count, 1)
+                        if hasattr(rule, "score_rules") and hasattr(rule.score_rules, "settle_gang_payment"):
+                            rule.score_rules.settle_gang_payment(player, "补杠", None, game_state)
                         break
             else:
                 count = sum(1 for c in player.hand if c == target_card)
@@ -161,6 +217,8 @@ class TurnHandler:
                     # 接杠：继承连杠次数
                     inherited = getattr(from_action.from_player, "consecutive_gang_count", 0)
                     player.consecutive_gang_count = inherited + 1
+                    if hasattr(rule, "score_rules") and hasattr(rule.score_rules, "settle_gang_payment"):
+                        rule.score_rules.settle_gang_payment(player, "明杠", from_action.from_player, game_state)
                 elif not from_action and count == 4:
                     # 暗杠：手里四张
                     used = []
@@ -171,6 +229,8 @@ class TurnHandler:
                     player.melds.append(Meld("暗杠", used, concealed=True))
                     player.last_action = "暗杠"
                     player.consecutive_gang_count += 1
+                    if hasattr(rule, "score_rules") and hasattr(rule.score_rules, "settle_gang_payment"):
+                        rule.score_rules.settle_gang_payment(player, "暗杠", None, game_state)
                 else:
                     return
 
@@ -223,44 +283,53 @@ class TurnHandler:
             player: 胡牌的玩家
             game_state: 游戏状态实例
         """
-        # 设置游戏结束
-        game_state.game_stage = "ended"
-        game_state.winner = player
-        
+        # 记录赢家
+        if player not in game_state.winners:
+            game_state.winners.append(player)
+        if not game_state.winner:
+            game_state.winner = player
+
         # 计算分数
         if action.type == "hu":
             score = game_state.rule.calculate_score(player, action.card)
             player.score += score
 
+        # 血流模式不结束游戏，普通模式直接结束
+        if getattr(game_state.rule, "allow_multiple_hu", False):
+            game_state.last_discarded_card = None
+        else:
+            game_state.game_stage = "ended"
+
+        # 呼叫转移：胡牌后再执行一次，确保自摸杠上炮场景
+        if action.from_player and hasattr(game_state.rule, "handle_call_transfer"):
+            game_state.rule.handle_call_transfer(player, action.from_player)
+
 def init_game(rule_name: str, players_config: list):
-    """初始化游戏
-    
-    Args:
-        rule_name: 使用的规则名称
-        players_config: 玩家配置列表
-    
-    Returns:
-        初始化后的游戏状态
-    """
+    """初始化游戏，并按 rule_name 选择规则实现"""
     from src.core.data.game_state import GameState
     from src.core.data.player import Player
     from src.rules.tencent_common.rule import TencentCommonRule
-    
+    from src.rules.tencent_xueliu.rule import TencentXueliuRule
+
     # 1. 创建游戏状态
     game_state = GameState(rule_name)
-    
+
     # 2. 加载规则
-    # TODO: 实现规则加载逻辑，支持根据rule_name动态加载
-    rule = TencentCommonRule()
-    game_state.rule = rule
-    
+    rule_map = {
+        "tencent_common": TencentCommonRule,
+        "tencent_xueliu": TencentXueliuRule,
+    }
+    if rule_name not in rule_map:
+        raise ValueError(f"未知规则: {rule_name}")
+    game_state.rule = rule_map[rule_name]()
+
     # 3. 创建玩家
     for config in players_config:
         player = Player(config["name"], config["is_ai"])
         if config.get("ai_strategy"):
             player.ai_strategy = config["ai_strategy"]  # TODO: 实现AI策略加载
         game_state.players.append(player)
-    
+
     # 4. 设置玩家位置和邻居关系
     positions = ['东', '南', '西', '北']
     for i, player in enumerate(game_state.players):
@@ -271,12 +340,17 @@ def init_game(rule_name: str, players_config: list):
         player.previous_player = game_state.players[(i - 1) % len(game_state.players)]
         player.next_player = game_state.players[(i + 1) % len(game_state.players)]
         player.game_state = game_state
-    
+
     # 5. 洗牌和发牌
     shuffle_and_deal(game_state)
-    
+
+    # 5.5 血流换三张
+    if hasattr(game_state.rule, "exchange_three"):
+        game_state.rule.exchange_three(game_state)
+
     # 6. 设置游戏阶段为进行中
     game_state.current_player = game_state.players[0]  # 庄家先出牌
     game_state.game_stage = "playing"
-    
+    game_state.first_turn = True  # 标记首轮，用于天胡/地胡判定
+
     return game_state

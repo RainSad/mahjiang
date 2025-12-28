@@ -37,13 +37,31 @@ class TencentXueliuHuRules:
     def _check_que_men_rule(self, player, card) -> bool:
         """检查定缺规则
         
-        定缺规则：手牌中花色不能超过2门（不包括缺的花色）
+        血流成河定缺规则：
+        1. 必须已经定缺（que_men 不能为空）
+        2. 手牌中花色不能超过2门（不包括缺的花色）
+        3. 一旦定缺，游戏中不可更改
+        
+        args:
+            player: 玩家对象
+            card: 待胡的牌
+        
+        returns:
+            是否满足定缺规则
         """
         que_men = getattr(player, 'que_men', None)
-        if not que_men:
-            return False  # 必须已经定缺
         
-        # 组合临时手牌
+        # 规则 1：必须已经定缺
+        if not que_men:
+            return False  # 未定缺不得胡
+        
+        # 规则 3：检查定缺是否被非法更改（这里仅记录，主要由 UI 或游戏流程保证）
+        que_men_locked = getattr(player, 'que_men_locked', False)
+        if not que_men_locked:
+            # 首次定缺时锁定，后续不可更改
+            player.que_men_locked = True
+        
+        # 规则 2：手牌中花色不能超过2门（不包括缺的花色）
         temp_hand = player.hand.copy()
         if card is not None and len(temp_hand) % 3 == 1:
             temp_hand.append(card)

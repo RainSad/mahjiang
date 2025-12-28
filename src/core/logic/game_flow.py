@@ -19,8 +19,8 @@ class GameFlow:
         # 处理当前玩家的回合
         action = TurnHandler.process_turn(self.game_state)
         
-        # 如果是胡牌操作，游戏结束
-        if action.type == "hu":
+        # 普通规则下胡牌即结束；血流模式继续
+        if action.type == "hu" and not getattr(self.game_state.rule, "allow_multiple_hu", False):
             self.end_game()
     
     def end_game(self):

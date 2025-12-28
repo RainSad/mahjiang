@@ -17,6 +17,8 @@ class GameState:
         self.last_discarded_card = None  # 上一张打出的牌
         self.game_stage = "init"    # 游戏阶段：init/playing/ended
         self.winner = None          # 赢家
+        self.winners = []           # 多家胡时的赢家列表（按顺序）
         self.round_number = 1       # 局数
         self.wind = "东"            # 场风
         self.rule: Optional[BaseRule] = None  # 当前规则实例
+        self.settlement_logs = []   # 结算明细日志（查花猪/查大叫/退税等）

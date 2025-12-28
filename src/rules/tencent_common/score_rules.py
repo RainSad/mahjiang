@@ -185,15 +185,16 @@ class TencentScoreRules:
     # ===================== 4 番 =====================
     def _check_4_fans(self, player) -> int:
         fans = 0
+        honor_present = any(t.suit in ['风', '箭'] for t in self._all_tiles(player))
         if self._is_duan_yao_jiu(player):
             fans += 4
-        if self._is_yi_ban_gao(player):
+        if not honor_present and self._is_yi_ban_gao(player):
             fans += 4
-        if self._is_xi_xiang_feng(player):
+        if not honor_present and self._is_xi_xiang_feng(player):
             fans += 4
-        if self._is_lian_liu(player):
+        if not honor_present and self._is_lian_liu(player):
             fans += 4
-        if self._is_lao_shao_fu(player):
+        if not honor_present and self._is_lao_shao_fu(player):
             fans += 4
         if self._is_jian_ke(player):
             fans += 4
@@ -205,7 +206,7 @@ class TencentScoreRules:
             fans += 4
         if self._is_si_gui_yi(player):
             fans += 4
-        if self._is_men_qing(player):
+        if not honor_present and self._is_men_qing(player):
             fans += 4
         if self._is_shuang_an_ke(player):
             fans += 4
@@ -226,6 +227,8 @@ class TencentScoreRules:
     def _check_1_fans(self, player, winning_card) -> int:
         fans = 0
         if self._is_zi_mo(player, winning_card):
+            fans += 1
+        if self._is_yao_jiu_ke(player, winning_card):
             fans += 1
         return fans
 
@@ -510,9 +513,9 @@ class TencentScoreRules:
         return len(self._hand_only(player)) == 1 and len(getattr(player, 'melds', [])) == 4
 
     def _is_dai_yao_jiu(self, player) -> bool:
+        """带幺九：严格要求全部牌为幺九或字牌，避免与箭刻等组合叠加过多番数。"""
         tiles = self._all_tiles(player)
-        terminal_or_honor = {t for t in tiles if (t.suit in ['万', '筒', '条'] and t.rank in ['1', '9']) or t.suit in ['风', '箭']}
-        return len(terminal_or_honor) > 0 and len(terminal_or_honor) < len(tiles)
+        return all((t.suit in ['万', '筒', '条'] and t.rank in ['1', '9']) or t.suit in ['风', '箭'] for t in tiles)
 
     def _is_mixed_suit(self, player) -> bool:
         suits = {t.suit for t in self._all_tiles(player)}

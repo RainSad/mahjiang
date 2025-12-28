@@ -2,7 +2,6 @@ from typing import List, Tuple
 
 from src.core.data.action import Action
 from src.ai.evaluation.risk_evaluator import RiskEvaluator
-from src.rules.tencent_common.score_rules import TencentScoreRules
 from src.ai.strategy.base_strategy import BaseStrategy
 
 
@@ -11,7 +10,8 @@ class AdvancedStrategy(BaseStrategy):
 
     def __init__(self, rule):
         super().__init__(rule)
-        self.score_rules = TencentScoreRules(rule)
+        # 规则提供的计分模块，用于估算番型潜力
+        self.score_rules = getattr(rule, "score_rules", None)
 
     def recommend(self, player, game_state, valid_actions: List[str]) -> Tuple[Action, str]:
         # 沿用基础的动作优先级
@@ -61,7 +61,7 @@ class AdvancedStrategy(BaseStrategy):
         temp_player.melds = list(player.melds)
         temp_player.drawn_card = None
         try:
-            fans = self.score_rules._calculate_fans(temp_player, discard_candidate)
+            fans = self.score_rules._calculate_fans(temp_player, discard_candidate) if self.score_rules else 0
         except Exception:
             fans = 0
         # 映射为0-1区间

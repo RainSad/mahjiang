@@ -12,6 +12,15 @@ def get_player_input(player, game_state, valid_actions):
     reason = rec["reason"]
     risk_lines = ", ".join(f"{item['card']}: {item['risk']}" for item in rec["risk"])
 
+    # 定缺强制先打缺门牌：推荐动作改为缺门弃牌
+    if "must_discard_que" in valid_actions:
+        que_men = getattr(player, "que_men", None)
+        que_card = next((c for c in player.hand if c.suit == que_men), None)
+        if que_card:
+            from src.core.data.action import Action
+            action = Action("discard", que_card)
+            reason = f"定缺 {que_men}，必须先打出缺门牌"
+
     print("\n=== AI 推荐 ===")
     print(f"动作: {action.type} {action.card if action.card else ''} | 理由: {reason}")
     print(f"风险评估: {risk_lines}")
@@ -27,6 +36,11 @@ def get_player_input(player, game_state, valid_actions):
         card_id = input("输入要打出的牌(例: 万1): ").strip()
         for c in player.hand:
             if c.id == card_id:
+                # 定缺限制：只能打出缺门
+                que_men = getattr(player, "que_men", None)
+                if "must_discard_que" in valid_actions and que_men and c.suit != que_men:
+                    print(f"必须先打出缺门 {que_men}，已改用推荐")
+                    return action
                 return Action("discard", c)
         print("未找到该牌，使用推荐")
         return action

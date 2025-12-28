@@ -114,6 +114,62 @@ class TencentXueliuScoreRules:
             multiplier *= 4
         
         return multiplier
+
+    def settle_gang_payment(self, player, gang_type: str, from_player, game_state):
+        """按规则文档结算杠分并记录最近杠收益，用于呼叫转移。
+        gang_type: 明杠/暗杠/补杠
+        """
+        base = 10
+        gain = 0
+        event = {"type": gang_type, "gain": 0, "contributors": {}}
+        if gang_type == "明杠" and from_player:
+            gain = base * 2
+            player.score += gain
+            from_player.score -= gain
+            # 统计总收益/损失
+            player.total_gang_gain = getattr(player, 'total_gang_gain', 0) + gain
+            from_player.total_gang_loss = getattr(from_player, 'total_gang_loss', 0) + gain
+            event["gain"] = gain
+            event["contributors"][from_player] = gain
+        elif gang_type == "补杠":
+            gain_each = base * 1
+            for other in game_state.players:
+                if other is player:
+                    continue
+                player.score += gain_each
+                other.score -= gain_each
+                # 统计总收益/损失
+                player.total_gang_gain = getattr(player, 'total_gang_gain', 0) + gain_each
+                other.total_gang_loss = getattr(other, 'total_gang_loss', 0) + gain_each
+            gain = gain_each * (len(game_state.players) - 1)
+            event["gain"] = gain
+            for other in game_state.players:
+                if other is player:
+                    continue
+                event["contributors"][other] = gain_each
+        elif gang_type == "暗杠":
+            gain_each = base * 2
+            for other in game_state.players:
+                if other is player:
+                    continue
+                player.score += gain_each
+                other.score -= gain_each
+                # 统计总收益/损失
+                player.total_gang_gain = getattr(player, 'total_gang_gain', 0) + gain_each
+                other.total_gang_loss = getattr(other, 'total_gang_loss', 0) + gain_each
+            gain = gain_each * (len(game_state.players) - 1)
+            event["gain"] = gain
+            for other in game_state.players:
+                if other is player:
+                    continue
+                event["contributors"][other] = gain_each
+        player.last_gang_gain = gain
+        # 记录事件明细以供退税与呼叫转移
+        if event["gain"] > 0:
+            if not hasattr(player, 'gang_events'):
+                player.gang_events = []
+            player.gang_events.append(event)
+            player.last_gang_event = event
     
     # ========== 256倍番型 ==========
     def _check_256_fans(self, player, winning_card) -> int:
@@ -205,46 +261,43 @@ class TencentXueliuScoreRules:
         
         return 0
     
-    # ========== 4倍番型（可累加） ==========
+    # ========== 4倍番型（可累加，需要互斥处理） ==========
     def _check_4_fans(self, player, winning_card) -> int:
-        """4倍番型（可累加）：清一色、七对、金钩钓、幺九、断幺九、碰碰胡、根、自摸、杠上开花、杠上炮、抢杠胡、海底捞月"""
+        """4倍番型（可累加）：清一色、七对、金钩钓、幺九、断幺九、碰碰胡
+        
+        互斥关系（"不计"）：
+        - 清一色 与 七对/金钩钓/清碰/清七对/清金钩钓 互斥
+        - 七对 与 碰碰胡 互斥
+        - 幺九 与 断幺九 互斥（不能同时满足）
+        - 碰碰胡 与 将对/将七对/将金钩钓/将十八罗汉 互斥
+        """
         fans = 0
         
-        # 清一色
+        # 检查是否已被高倍番型覆盖
         if self._is_qing_yi_se(player):
-            fans += 4
+            # 清一色：如果已是清组合（清七对/清碰/清金钩钓），由高倍番型处理，4倍不重复
+            if not (self._is_qing_qi_dui(player) or self._is_qing_peng(player) or 
+                    self._is_qing_jin_gou_diao(player)):
+                fans += 4
+        else:
+            # 非清一色时的其他番型
+            
+            # 七对 与 碰碰胡 互斥
+            if self._is_qi_dui(player):
+                fans += 4
+            elif self._is_peng_peng_hu(player) and not self._is_jiang_dui(player):
+                fans += 4
         
-        # 七对
-        if self._is_qi_dui(player):
-            fans += 4
+        # 金钩钓（非清一色且非十八罗汉组合下）
+        if self._is_jin_gou_diao(player) and not self._is_qing_yi_se(player):
+            if not self._is_shi_ba_luo_han(player):
+                fans += 4
         
-        # 金钩钓
-        if self._is_jin_gou_diao(player):
-            fans += 4
-        
-        # 幺九
+        # 幺九 与 断幺九 互斥，选幺九（更高级）
         if self._is_yao_jiu(player):
             fans += 4
-        
-        # 断幺九
-        if self._is_duan_yao_jiu(player):
+        elif self._is_duan_yao_jiu(player):
             fans += 4
-        
-        # 碰碰胡
-        if self._is_peng_peng_hu(player):
-            fans += 4
-        
-        # 根（通过杠倍数计算，这里不重复累加）
-        
-        # 自摸（通过特殊倍数计算，这里不重复累加）
-        
-        # 杠上开花（通过特殊倍数计算，这里不重复累加）
-        
-        # 杠上炮（通过特殊倍数计算，这里不重复累加）
-        
-        # 抢杠胡（通过特殊倍数计算，这里不重复累加）
-        
-        # 海底捞月（通过特殊倍数计算，这里不重复累加）
         
         return fans
     
@@ -358,8 +411,14 @@ class TencentXueliuScoreRules:
         return all(t.suit in ['万', '筒', '条'] and t.rank in ['2', '5', '8'] for t in tiles)
     
     def _is_shi_ba_luo_han(self, player) -> bool:
-        """十八罗汉：金钩钓且胡牌时有4个杠牌"""
-        return self._gang_count(player) == 4 and self._is_jin_gou_diao(player)
+        """十八罗汉：金钩钓+4个杠，必须满足2个条件"""
+        # 必须是金钩钓（4组面子+1对+手牌仅剩2张）
+        if not self._is_jin_gou_diao(player):
+            return False
+        # 必须有4个杠
+        if self._gang_count(player) != 4:
+            return False
+        return True
     
     def _is_qing_yi_se(self, player) -> bool:
         """清一色：全部由万/筒/条中某一种花色组成"""
@@ -377,10 +436,26 @@ class TencentXueliuScoreRules:
         return all(v == 2 for v in counts.values()) and len(counts) == 7
     
     def _is_jin_gou_diao(self, player) -> bool:
-        """金钩钓：胡牌时其他牌都被碰/杠，手牌只剩一张牌单钓"""
+        """金钩钓：胡牌时其他牌都被碰/杠，手牌只剩一张牌单钓胡牌
+        
+        条件：
+        - 手牌仅剩2张（一对对子+待胡牌）或副露4组+手牌2张
+        - 副露全为碰或杠（不含吃）
+        """
         hand = self._hand_only(player)
         melds = getattr(player, 'melds', [])
-        return len(hand) == 2 and len(melds) == 4
+        
+        # 手牌和副露数量检查
+        if len(hand) != 2 or len(melds) != 4:
+            return False
+        
+        # 副露必须全是碰或杠
+        for meld in melds:
+            meld_type = getattr(meld, 'type', '')
+            if meld_type not in ['碰', '明杠', '暗杠', '补杠']:
+                return False
+        
+        return True
     
     def _is_yao_jiu(self, player) -> bool:
         """幺九：每个刻子、顺子、将都包含1/9序数牌"""

@@ -57,9 +57,10 @@ class TencentXueliuActionRules:
         # 基本操作：打牌
         valid_actions.append("discard")
         
-        # 检查是否必须打出缺门的牌
+        # 定缺：若有缺门牌，必须先打出，其他动作暂停
         if self.rule.must_discard_que_men(player):
             valid_actions.append("must_discard_que")
+            return valid_actions
         
         # 如果有上一张打出的牌，检查是否可以碰杠胡
         if game_state.last_discarded_card:
@@ -85,7 +86,7 @@ class TencentXueliuActionRules:
             if self.rule.hu_rules.can_hu(player, player.drawn_card):
                 valid_actions.append("hu")
         
-        # 检查是否可以暗杠或补杠
+        # 检查是否可以暗杠或补杠（统一用 kong 动作类型，交由执行层区分）
         if self.rule.allow_kong:
             from collections import Counter
             hand_counts = Counter(player.hand)
@@ -93,7 +94,7 @@ class TencentXueliuActionRules:
             # 检查暗杠（手牌中有四张）
             for card, count in hand_counts.items():
                 if count == 4:
-                    valid_actions.append("an_gang")
+                    valid_actions.append("kong")
                     break
             
             # 检查补杠（已碰过，手牌中有第四张）
@@ -103,7 +104,7 @@ class TencentXueliuActionRules:
                 if meld_type == '碰' and meld_cards:
                     pong_card = meld_cards[0]
                     if hand_counts[pong_card] >= 1:
-                        valid_actions.append("bu_gang")
+                        valid_actions.append("kong")
                         break
         
         return valid_actions
