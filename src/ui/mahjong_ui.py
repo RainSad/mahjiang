@@ -136,6 +136,20 @@ class MainWindow(QMainWindow):
     def handle_player_action(self, action_type: str, card=None):
         """External hook for human actions (from page action buttons)."""
         from src.core.data.action import Action
+        # 新增：定缺选择（仅血流）
+        if action_type == "set_que":
+            player = self.game_state.current_player
+            suit = card  # "万"/"筒"/"条"
+            player.que_men = suit
+            player.que_men_locked = True
+            self.log_updated.emit(f"{player.name}: 定缺为 {suit}")
+            self.game_updated.emit()
+            # 更新页面以应用缺门打牌提示
+            self._render_player_ui()
+            # 若定缺后计时器停着，继续对局
+            if not self._timer.isActive():
+                self._timer.start()
+            return
 
         # "pass" means skip non-discard actions
         if action_type == "pass":
@@ -190,6 +204,34 @@ class MainWindow(QMainWindow):
         self._refresh_labels()
         self._refresh_players()
         self._switch_rule_page(rule_name)
+        # 新增：血流规则为AI自动定缺（选择数量最少的一门）
+        if rule_name == "tencent_xueliu":
+            self._auto_set_ai_que()
+
+    def _auto_set_ai_que(self):
+        """为血流规则的AI自动定缺：选手牌中数量最少的一门"""
+        try:
+            for p in self.game_state.players:
+                if not p.is_ai:
+                    continue
+                counts = {
+                    "万": sum(1 for c in p.hand if getattr(c, "suit", "") == "万"),
+                    "筒": sum(1 for c in p.hand if getattr(c, "suit", "") == "筒"),
+                    "条": sum(1 for c in p.hand if getattr(c, "suit", "") == "条"),
+                }
+                # 选最少的一门作为缺门；稳定排序保证一致性
+                min_count = min(counts.values())
+                candidates = [s for s, n in counts.items() if n == min_count]
+                # 偏好顺序：条 < 筒 < 万（任意稳定序）
+                order = {"条": 0, "筒": 1, "万": 2}
+                suit = sorted(candidates, key=lambda s: order[s])[0]
+                p.que_men = suit
+                p.que_men_locked = True
+            # 刷新快照
+            self._refresh_players()
+        except Exception as e:
+            # 如果任何异常，不影响对局继续
+            self.log_updated.emit(f"自动定缺失败: {e}")
 
     def _refresh_players(self):
         """Render a text snapshot of all players (position/score/que)."""

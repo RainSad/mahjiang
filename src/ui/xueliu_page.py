@@ -15,6 +15,7 @@ class XueliuPage(RulePage):
         super().__init__()
         self._widget = None
         self._info_label = None
+        self._exchange_label = None
         self._detail_label = None
         self._hand_container = None
         self._hand_layout = None
@@ -28,8 +29,10 @@ class XueliuPage(RulePage):
         
         # 规则信息标签
         self._info_label = QLabel("血流成河：定缺、换三张、多胡模式")
+        self._exchange_label = QLabel("")  # 换三张提示
         self._detail_label = QLabel("尚未开始")
         layout.addWidget(self._info_label)
+        layout.addWidget(self._exchange_label)
         layout.addWidget(self._detail_label)
         
         # 手牌区域
@@ -51,6 +54,9 @@ class XueliuPage(RulePage):
         if not game_state:
             self._detail_label.setText("尚未开始")
             return
+        # 提示：换三张已在发牌后自动执行
+        self._exchange_label.setText("提示：换三张已在开局后自动执行")
+        self._exchange_label.setStyleSheet("color: #666;")
         
         # 汇总定缺、换三张、弃牌数等信息
         lines = []
@@ -71,7 +77,26 @@ class XueliuPage(RulePage):
             if w:
                 w.deleteLater()
         
-        # 定缺提示
+        # 未定缺：展示定缺选择（缺万/缺筒/缺条）
+        que = getattr(player, "que_men", None)
+        if not que:
+            self._actions_layout.addWidget(QLabel("请选择定缺："))
+            btn_wan = QPushButton("缺万")
+            btn_tong = QPushButton("缺筒")
+            btn_tiao = QPushButton("缺条")
+            btn_wan.clicked.connect(lambda: action_callback("set_que", "万"))
+            btn_tong.clicked.connect(lambda: action_callback("set_que", "筒"))
+            btn_tiao.clicked.connect(lambda: action_callback("set_que", "条"))
+            self._actions_layout.addWidget(btn_wan)
+            self._actions_layout.addWidget(btn_tong)
+            self._actions_layout.addWidget(btn_tiao)
+            # 未定缺时不允许其他动作
+            hint_unset = QLabel("未定缺，暂不可碰/杠/胡")
+            hint_unset.setStyleSheet("color: #d35400;")
+            self._actions_layout.addWidget(hint_unset)
+            return
+        
+        # 定缺提示：若必须先打缺门牌，暂停其他动作
         if "must_discard_que" in valid_actions:
             que = getattr(player, "que_men", "")
             hint_label = QLabel(f"必须先打出缺门({que})牌！")
