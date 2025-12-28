@@ -72,15 +72,31 @@ class DeckManager:
         return game_state.deck.pop()
     
     @staticmethod
-    def discard_card(game_state, card) -> None:
-        """将牌打入弃牌堆
-        
-        Args:
-            game_state: 游戏状态实例
-            card: 要打出的牌
-        """
-        game_state.discard_pile.append(card)
-        game_state.last_discarded_card = card
+    def discard_card(game_state, action) -> None:
+        """将牌打入弃牌堆，记录完整来源信息"""
+        game_state.discard_pile.append(action.card)
+        game_state.last_discarded_card = action
+
+    @staticmethod
+    def draw_replacement(game_state, count: int = 3):
+        """补牌：从牌墙随机取 count 张，选择其中一张入手，其余放回再洗"""
+        deck = game_state.deck
+        if not deck:
+            return None
+
+        draw_count = min(count, len(deck))
+        pulled = [deck.pop() for _ in range(draw_count)]
+        if not pulled:
+            return None
+
+        import random
+
+        chosen = random.choice(pulled)
+        # 未选中的牌放回并打乱，保持随机性
+        remaining = [c for c in pulled if c is not chosen]
+        deck.extend(remaining)
+        random.shuffle(deck)
+        return chosen
 
 def shuffle_and_deal(game_state) -> None:
     """洗牌并发牌

@@ -1,42 +1,64 @@
+from typing import List, Tuple
+
+from src.core.data.action import Action
+from src.ai.evaluation.risk_evaluator import RiskEvaluator
+
+
 class BaseStrategy:
-    """AI策略基类"""
-    
+    """基础出牌策略：提供可解释的决策逻辑，优先安全与番型机会。"""
+
     def __init__(self, rule):
         self.rule = rule
-    
-    def recommend_action(self, player, game_state):
-        """推荐动作
-        
-        Args:
-            player: 当前玩家
-            game_state: 当前游戏状态
-        
-        Returns:
-            tuple: (推荐动作类型, 推荐牌, 推荐理由)
-        """
-        raise NotImplementedError("子类必须实现recommend_action方法")
-    
-    def evaluate_hand(self, player, game_state):
-        """评估手牌价值
-        
-        Args:
-            player: 当前玩家
-            game_state: 当前游戏状态
-        
-        Returns:
-            float: 手牌价值评分
-        """
-        raise NotImplementedError("子类必须实现evaluate_hand方法")
-    
-    def calculate_discard_value(self, card, player, game_state):
-        """计算打出某张牌的价值
+        self.risk_evaluator = RiskEvaluator(rule)
 
-        Args:
-            card: 要评估的牌
-            player: 当前玩家
-            game_state: 当前游戏状态
-        
-        Returns:
-            float: 打出该牌的价值评分（越高越好）
-        """
-        raise NotImplementedError("子类必须实现calculate_discard_value方法")
+    def recommend(self, player, game_state, valid_actions: List[str]) -> Tuple[Action, str]:
+        """给出推荐操作及理由。"""
+        # 最高优先：胡
+        if "hu" in valid_actions:
+            return Action("hu", player.drawn_card or game_state.last_discarded_card), "可胡牌，直接胡"
+
+        # 次优先：杠（保留连杠机会）
+        if "kong" in valid_actions:
+            target = player.drawn_card or getattr(game_state.last_discarded_card, "card", None)
+            return Action("kong", target), "可杠提升收益"
+
+        # 碰/吃用于阻断或成型
+        if "pong" in valid_actions:
+            target = getattr(game_state.last_discarded_card, "card", None)
+            return Action("pong", target), "碰牌成刻或阻断他家"
+        if "chow" in valid_actions:
+            target = getattr(game_state.last_discarded_card, "card", None)
+            return Action("chow", target), "吃牌补顺子"
+
+        # 补花
+        if "flower" in valid_actions:
+            return Action("flower"), "补花补牌"
+
+        # 默认：打出风险最低、成型价值低的牌
+        discard_card, reason = self._select_discard(player, game_state)
+        return Action("discard", discard_card), reason
+
+    def _select_discard(self, player, game_state):
+        risks = []
+        for c in player.hand:
+            risk = self.risk_evaluator.evaluate_card_risk(c, player, game_state)
+            potential = self._meld_potential(c, player)
+            score = risk + (1 - potential)  # 低风险且潜力低优先打出
+            risks.append((score, risk, potential, c))
+        risks.sort(key=lambda x: x[0])
+        _, risk, potential, card = risks[0]
+        reason = f"风险={risk:.2f}, 成型潜力={potential:.2f}"
+        return card, reason
+
+    @staticmethod
+    def _meld_potential(card, player) -> float:
+        """粗略评估牌的成型潜力（顺子/刻子）。"""
+        same = sum(1 for c in player.hand if c == card)
+        if same >= 2:
+            return 0.9  # 已有对子/刻子潜力高
+        if card.suit in {"万", "筒", "条"}:
+            ranks = {int(c.rank) for c in player.hand if c.suit == card.suit}
+            r = int(card.rank)
+            neighbors = sum(1 for dr in (-2, -1, 1, 2) if r + dr in ranks)
+            return min(0.2 + 0.2 * neighbors, 0.8)
+        return 0.1  # 字牌默认潜力低

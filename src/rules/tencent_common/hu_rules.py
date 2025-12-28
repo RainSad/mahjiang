@@ -109,19 +109,16 @@ class TencentHuRules:
         # 计算番数
         fans = score_rules._calculate_fans(player, card)
         
-        # 鸡胡的情况：
-        # 1. 如果是自摸，番数为1（只有自摸的1番）
-        # 2. 如果不是自摸，番数为0（没有任何番型）
-        if card == player.drawn_card:
-            return fans == 1
-        else:
-            return fans == 0
+        # 定义：总番数仅为1则视为鸡胡（最基础的胡牌）。
+        return fans == 1
     
     def _check_basic_hu_condition(self, player, card) -> bool:
         """检查基本胡牌条件：将牌+四组面子"""
         # 临时组合手牌用于检查
         temp_hand = player.hand.copy()
-        temp_hand.append(card)
+        # 仅在手牌张数为 13 时补上待胡的牌，避免 14 张牌被重复添加导致判断失败
+        if card is not None and len(temp_hand) % 3 == 1:
+            temp_hand.append(card)
         
         # 按照花色和点数排序，便于检查
         sorted_hand = self._sort_hand(temp_hand)

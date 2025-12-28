@@ -1,4 +1,4 @@
-from src.core.data.action import Action
+from src.core.data.action import Action, Meld
 from src.core.logic.deck_manager import DeckManager, shuffle_and_deal
 
 class TurnHandler:
@@ -32,7 +32,7 @@ class TurnHandler:
         
         # 4. AI决策或玩家输入
         if current_player.is_ai:
-            from src.ai.decision import AI_Decision
+            from src.ai.strategy.decision import AI_Decision
             ai_decision = AI_Decision(current_player.ai_strategy, rule)
             action = ai_decision.make_decision(current_player, game_state, valid_actions)
         else:
@@ -41,9 +41,13 @@ class TurnHandler:
         
         # 5. 执行操作
         TurnHandler.execute_action(action, current_player, game_state)
+
+        # 补花/杠后需要继续当前玩家的回合（补牌后再决策）
+        if action and action.type in ["kong", "flower"]:
+            return TurnHandler.process_turn(game_state)
         
         # 6. 检查是否有其他玩家可以胡牌（如果是打牌操作）
-        if action.type == "discard" and rule.allow_other_hu:
+        if action and action.type == "discard" and rule.allow_other_hu:
             for player in game_state.players:
                 if player != current_player and rule.can_hu(player, action.card):
                     hu_action = Action("hu", action.card, current_player)
@@ -73,23 +77,132 @@ class TurnHandler:
             # 打牌
             if action.card in player.hand:
                 player.hand.remove(action.card)
-                DeckManager.discard_card(game_state, action.card)
                 action.from_player = player
+                DeckManager.discard_card(game_state, action)
+            player.last_action = "出牌"
+            player.drawn_card = None
+            player.consecutive_gang_count = 0
         elif action.type == "chow":
-            # 吃牌
-            # TODO: 实现吃牌逻辑
-            pass
+            # 吃牌：使用上家弃牌与手牌组成顺子
+            from_action = game_state.last_discarded_card
+            target_card = action.card or (from_action.card if from_action else None)
+            if not target_card:
+                return
+            # 找到任意可用组合
+            combos = []
+            current_rank = int(target_card.rank)
+            candidates = {
+                (current_rank - 2, current_rank - 1),
+                (current_rank - 1, current_rank + 1),
+                (current_rank + 1, current_rank + 2),
+            }
+            for a, b in candidates:
+                needed = {str(a), str(b)}
+                if all(any(c.suit == target_card.suit and c.rank == r for c in player.hand) for r in needed):
+                    combos.append(needed)
+            if combos:
+                use = combos[0]
+                used_cards = []
+                for r in use:
+                    for c in player.hand:
+                        if c.suit == target_card.suit and c.rank == r:
+                            used_cards.append(c)
+                            player.hand.remove(c)
+                            break
+                meld_cards = used_cards + [target_card]
+                player.melds.append(Meld("吃", meld_cards, from_player=getattr(from_action, "from_player", None)))
+                player.last_action = "吃"
+                player.consecutive_gang_count = 0
+                if game_state.discard_pile and game_state.discard_pile[-1] == target_card:
+                    game_state.discard_pile.pop()
+                game_state.last_discarded_card = None
         elif action.type == "pong":
-            # 碰牌
-            # TODO: 实现碰牌逻辑
-            pass
+            from_action = game_state.last_discarded_card
+            target_card = action.card or (from_action.card if from_action else None)
+            if not target_card:
+                return
+            needed = [c for c in player.hand if c == target_card][:2]
+            if len(needed) == 2:
+                for c in needed:
+                    player.hand.remove(c)
+                player.melds.append(Meld("碰", needed + [target_card], from_player=getattr(from_action, "from_player", None)))
+                player.last_action = "碰"
+                player.consecutive_gang_count = 0
+                if game_state.discard_pile and game_state.discard_pile[-1] == target_card:
+                    game_state.discard_pile.pop()
+                game_state.last_discarded_card = None
         elif action.type == "kong":
-            # 杠牌
-            # TODO: 实现杠牌逻辑
-            pass
+            from_action = game_state.last_discarded_card
+            target_card = action.card or (from_action.card if from_action else None)
+            if not target_card:
+                return
+
+            # 补杠：已碰的面子加一张
+            for meld in player.melds:
+                if getattr(meld, "type", "") == "碰" and any(c == target_card for c in getattr(meld, "cards", [])):
+                    if target_card in player.hand:
+                        player.hand.remove(target_card)
+                        meld.cards.append(target_card)
+                        meld.type = "补杠"
+                        player.last_action = "补杠"
+                        player.consecutive_gang_count = max(player.consecutive_gang_count, 1)
+                        break
+            else:
+                count = sum(1 for c in player.hand if c == target_card)
+                if from_action and from_action.from_player is not None and count >= 3:
+                    # 明杠：别人弃牌 + 自己3张
+                    used = []
+                    for _ in range(3):
+                        card_obj = next(c for c in player.hand if c == target_card)
+                        player.hand.remove(card_obj)
+                        used.append(card_obj)
+                    player.melds.append(Meld("明杠", used + [target_card], from_player=from_action.from_player, concealed=False))
+                    player.last_action = "明杠"
+                    # 接杠：继承连杠次数
+                    inherited = getattr(from_action.from_player, "consecutive_gang_count", 0)
+                    player.consecutive_gang_count = inherited + 1
+                elif not from_action and count == 4:
+                    # 暗杠：手里四张
+                    used = []
+                    for _ in range(4):
+                        card_obj = next(c for c in player.hand if c == target_card)
+                        player.hand.remove(card_obj)
+                        used.append(card_obj)
+                    player.melds.append(Meld("暗杠", used, concealed=True))
+                    player.last_action = "暗杠"
+                    player.consecutive_gang_count += 1
+                else:
+                    return
+
+            # 杠后补牌（补3取1）
+            replacement = DeckManager.draw_replacement(game_state)
+            player.drawn_card = replacement
+            if replacement:
+                player.hand.append(replacement)
+            player.last_action = player.last_action or "杠牌"
+            player.consecutive_gang_count = max(player.consecutive_gang_count, 1)
+            if game_state.discard_pile and game_state.discard_pile[-1] == target_card:
+                game_state.discard_pile.pop()
+            game_state.last_discarded_card = None
         elif action.type == "hu":
             # 胡牌
             TurnHandler.handle_hu(action, player, game_state)
+        elif action.type == "flower":
+            flowers = [action.card] if action.card else [c for c in player.hand if c.suit == "花"]
+            if not flowers:
+                return
+            for f in flowers:
+                if f in player.hand:
+                    player.hand.remove(f)
+                    player.melds.append(Meld("补花", [f], concealed=False))
+                    player.changed_flower_count = getattr(player, "changed_flower_count", 0) + 1
+                    player.last_action = "补花"
+                    player.consecutive_gang_count += 1
+                    # 补花后补牌
+                    replacement = DeckManager.draw_replacement(game_state)
+                    player.drawn_card = replacement
+                    if replacement:
+                        player.hand.append(replacement)
     
     @staticmethod
     def switch_player(game_state):
@@ -153,8 +266,11 @@ def init_game(rule_name: str, players_config: list):
     for i, player in enumerate(game_state.players):
         player.position = positions[i]
         player.is_dealer = (i == 0)  # 第一个玩家为庄家
+        player.men_feng = positions[i]
+        player.chang_feng = game_state.wind
         player.previous_player = game_state.players[(i - 1) % len(game_state.players)]
         player.next_player = game_state.players[(i + 1) % len(game_state.players)]
+        player.game_state = game_state
     
     # 5. 洗牌和发牌
     shuffle_and_deal(game_state)

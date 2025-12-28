@@ -17,7 +17,7 @@ class TencentActionRules:
             return False
         
         # 检查花色是否相同（只能吃序数牌）
-        if card.suit not in ['万', '筒', '条'] or any(c.suit != card.suit for c in player.hand):
+        if card.suit not in ['万', '筒', '条']:
             return False
         
         # 检查是否能组成顺子
@@ -87,8 +87,9 @@ class TencentActionRules:
         
         # 如果有上一张打出的牌，检查是否可以吃碰杠胡
         if game_state.last_discarded_card:
-            last_card = game_state.last_discarded_card.card
-            last_player = game_state.last_discarded_card.from_player
+            last_action = game_state.last_discarded_card
+            last_card = getattr(last_action, 'card', None) or game_state.last_discarded_card
+            last_player = getattr(last_action, 'from_player', None)
             
             # 检查是否可以吃牌
             if self.rule.allow_chow and self.can_chow(player, last_card, last_player):
