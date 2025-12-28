@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
 from src.core.logic.turn_handler import TurnHandler, init_game
 from src.core.logic.deck_manager import DeckManager
 from src.ui.xueliu_page import XueliuPage
+from src.ui.common_page import CommonPage
 
 
 # ===== PyQt Main Window ===== #
@@ -44,10 +45,6 @@ class MainWindow(QMainWindow):
         self.deck_label = QLabel("")
         self.players_view = QTextEdit()
         self.players_view.setReadOnly(True)
-        self.hand_container = QWidget()
-        self.hand_layout = QHBoxLayout(self.hand_container)
-        self.actions_container = QWidget()
-        self.actions_layout = QHBoxLayout(self.actions_container)
         self.start_button = QPushButton("开始游戏")
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
@@ -55,12 +52,18 @@ class MainWindow(QMainWindow):
         # 规则专属子页面容器
         self.rule_page_container = QWidget()
         self.rule_page_layout = QVBoxLayout(self.rule_page_container)
+        
+        # 初始化所有规则页面
         self.rule_pages = {
+            "tencent_common": CommonPage(),
             "tencent_xueliu": XueliuPage(),
         }
+        
+        # 设置所有规则页面并隐藏
         for page in self.rule_pages.values():
-            page.setVisible(False)
-            self.rule_page_layout.addWidget(page)
+            widget = page.setup_ui(self.rule_page_container)
+            widget.setVisible(False)
+            self.rule_page_layout.addWidget(widget)
 
         self._layout.addWidget(self.rule_selector)
         self._layout.addWidget(self.start_button)
@@ -68,8 +71,6 @@ class MainWindow(QMainWindow):
         self._layout.addWidget(self.deck_label)
         self._layout.addWidget(self.players_view)
         self._layout.addWidget(self.rule_page_container)
-        self._layout.addWidget(self.hand_container)
-        self._layout.addWidget(self.actions_container)
         self._layout.addWidget(self.log_view)
 
         # Signals/slots
@@ -94,7 +95,6 @@ class MainWindow(QMainWindow):
         self._refresh_labels()
         self._refresh_players()
         self._switch_rule_page(self.rule_selector.currentText())
-        self._render_hand_and_actions()
 
     @pyqtSlot()
     def start_game(self):
@@ -122,20 +122,24 @@ class MainWindow(QMainWindow):
             self.game_updated.emit()
             return
 
-        # Human player: ensure a drawn card exists, then wait for explicit action
+        # Human player: ensure a drawn card exists, then render UI for action selection
         if current.drawn_card is None:
             drawn = self._draw_for_player(current)
             if drawn is None:
                 self._handle_empty_deck()
                 return
         self.status_label.setText(f"等待 {current.name} 选择动作…")
-        self._render_hand_and_actions()
+        self._render_player_ui()
         self._timer.stop()
 
     @pyqtSlot(str, object)
     def handle_player_action(self, action_type: str, card=None):
-        """External hook for human actions (e.g., bound to card buttons)."""
+        """External hook for human actions (from page action buttons)."""
         from src.core.data.action import Action
+
+        # "pass" means skip non-discard actions
+        if action_type == "pass":
+            return
 
         player = self.game_state.current_player
         action = Action(action_type, card, from_player=player)
@@ -144,7 +148,7 @@ class MainWindow(QMainWindow):
             TurnHandler.switch_player(self.game_state)
         self.log_updated.emit(f"{player.name}: {action.type} {action.card if action.card else ''}")
         self.game_updated.emit()
-        self._render_hand_and_actions()
+        self._render_player_ui()
         if not self._timer.isActive():
             self._timer.start()
 
@@ -186,7 +190,6 @@ class MainWindow(QMainWindow):
         self._refresh_labels()
         self._refresh_players()
         self._switch_rule_page(rule_name)
-        self._render_hand_and_actions()
 
     def _refresh_players(self):
         """Render a text snapshot of all players (position/score/que)."""
@@ -198,56 +201,30 @@ class MainWindow(QMainWindow):
         # 更新规则子页面（如果存在）
         page = self.rule_pages.get(self.game_state.rule_name)
         if page:
-            page.update_state(self.game_state)
+            page.render_state(self.game_state)
 
-    def _render_hand_and_actions(self):
-        """Rebuild hand buttons for the current player and action buttons for available actions."""
-        # clear old widgets
-        while self.hand_layout.count():
-            item = self.hand_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-        while self.actions_layout.count():
-            item = self.actions_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-
+    def _render_player_ui(self):
+        """Delegate hand and action rendering to the active rule page."""
         player = self.game_state.current_player
-        valid = self.game_state.rule.get_valid_actions(player, self.game_state)
-
-        # render hand buttons (primarily for discard)
-        for card in sorted(player.hand, key=str):
-            btn = QPushButton(str(card))
-            btn.clicked.connect(lambda _=None, c=card: self.handle_player_action("discard", c))
-            self.hand_layout.addWidget(btn)
-
-        # action buttons for non-discard actions
-        def add_action_btn(text, action_type):
-            btn = QPushButton(text)
-            btn.clicked.connect(lambda _=None: self.handle_player_action(action_type))
-            self.actions_layout.addWidget(btn)
-
-        if "hu" in valid:
-            add_action_btn("胡", "hu")
-        if "pong" in valid:
-            add_action_btn("碰", "pong")
-        if "kong" in valid:
-            add_action_btn("杠", "kong")
-        if "flower" in valid:
-            add_action_btn("补花", "flower")
-        if "must_discard_que" in valid:
-            add_action_btn("必须出缺门", "discard")
+        if player.is_ai:
+            return
+        
+        valid_actions = self.game_state.rule.get_valid_actions(player, self.game_state)
+        page = self.rule_pages.get(self.game_state.rule_name)
+        if page:
+            page.render_hand(player, self.handle_player_action)
+            page.render_actions(player, self.game_state, valid_actions, self.handle_player_action)
 
     def _switch_rule_page(self, rule_name: str):
         """显示对应规则的子页面，其它页面隐藏。"""
         for name, page in self.rule_pages.items():
-            page.setVisible(name == rule_name)
+            widget = page.get_widget()
+            if widget:
+                widget.setVisible(name == rule_name)
         # 立即更新显示内容
         page = self.rule_pages.get(rule_name)
         if page:
-            page.update_state(self.game_state)
+            page.render_state(self.game_state)
 
 
 def run_pyqt_ui_game(rule_name: str = "tencent_common"):

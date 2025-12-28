@@ -2,12 +2,12 @@ from PyQt5.QtWidgets import QLabel, QVBoxLayout, QWidget, QPushButton, QHBoxLayo
 from src.ui.rule_page import RulePage
 
 
-class XueliuPage(RulePage):
-    """血流成河规则专用UI页面
+class CommonPage(RulePage):
+    """腾讯大众麻将规则专用UI页面
     
     特性：
-    - 显示定缺、换三张、多胡等血流特有信息
-    - 提供血流规则下的动作按钮（碰、杠、胡，无吃）
+    - 显示风位、花牌信息
+    - 提供大众麻将的动作按钮（吃、碰、杠、胡）
     - 展示手牌并允许选择打出
     """
 
@@ -27,7 +27,7 @@ class XueliuPage(RulePage):
         layout = QVBoxLayout(self._widget)
         
         # 规则信息标签
-        self._info_label = QLabel("血流成河：定缺、换三张、多胡模式")
+        self._info_label = QLabel("腾讯大众：吃碰杠胡、风箭花牌")
         self._detail_label = QLabel("尚未开始")
         layout.addWidget(self._info_label)
         layout.addWidget(self._detail_label)
@@ -52,18 +52,20 @@ class XueliuPage(RulePage):
             self._detail_label.setText("尚未开始")
             return
         
-        # 汇总定缺、换三张、弃牌数等信息
+        # 汇总场风、门风、花牌等信息
         lines = []
         for p in game_state.players:
-            que = getattr(p, "que_men", "-")
-            changed = getattr(p, "changed_flower_count", 0)
-            discarded_count = len(getattr(p, "discarded_cards", []))
-            lines.append(f"{p.position} {p.name} 缺:{que} 弃牌:{discarded_count} 分:{p.score}")
-        detail = "\n".join(lines) if lines else "等待开始"
+            wind = getattr(p, "wind", p.position)
+            flowers = sum(1 for m in getattr(p, "melds", []) if getattr(m, "type", "") == "补花")
+            dealer_mark = "庄" if p.is_dealer else ""
+            lines.append(f"{p.position}{dealer_mark} {p.name} 风:{wind} 花:{flowers} 分:{p.score}")
+        
+        game_wind = getattr(game_state, "wind", "东")
+        detail = f"场风: {game_wind}\n" + "\n".join(lines)
         self._detail_label.setText(detail)
 
     def render_actions(self, player, game_state, valid_actions: list, action_callback):
-        """构建血流规则的动作按钮（无吃牌）"""
+        """构建大众麻将的动作按钮（含吃牌）"""
         # 清空旧按钮
         while self._actions_layout.count():
             item = self._actions_layout.takeAt(0)
@@ -71,15 +73,7 @@ class XueliuPage(RulePage):
             if w:
                 w.deleteLater()
         
-        # 定缺提示
-        if "must_discard_que" in valid_actions:
-            que = getattr(player, "que_men", "")
-            hint_label = QLabel(f"必须先打出缺门({que})牌！")
-            hint_label.setStyleSheet("color: red; font-weight: bold;")
-            self._actions_layout.addWidget(hint_label)
-            return
-        
-        # 血流规则动作：碰、杠、胡（无吃）
+        # 大众麻将动作：吃、碰、杠、胡
         if "hu" in valid_actions:
             btn = QPushButton("胡")
             btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
@@ -91,9 +85,20 @@ class XueliuPage(RulePage):
             btn.clicked.connect(lambda: action_callback("pong", None))
             self._actions_layout.addWidget(btn)
         
+        if "chow" in valid_actions:
+            btn = QPushButton("吃")
+            btn.clicked.connect(lambda: action_callback("chow", None))
+            self._actions_layout.addWidget(btn)
+        
         if "kong" in valid_actions:
             btn = QPushButton("杠")
             btn.clicked.connect(lambda: action_callback("kong", None))
+            self._actions_layout.addWidget(btn)
+        
+        if "flower" in valid_actions:
+            btn = QPushButton("补花")
+            btn.setStyleSheet("background-color: #9b59b6; color: white;")
+            btn.clicked.connect(lambda: action_callback("flower", None))
             self._actions_layout.addWidget(btn)
         
         # 过
@@ -110,16 +115,21 @@ class XueliuPage(RulePage):
             if w:
                 w.deleteLater()
         
-        # 按花色和点数排序
-        sorted_hand = sorted(player.hand, key=lambda c: (c.suit, int(c.rank) if c.rank.isdigit() else 0))
+        # 按花色和点数排序（花牌放最后）
+        def sort_key(c):
+            suit_order = {'万': 0, '筒': 1, '条': 2, '风': 3, '箭': 4, '花': 5}
+            suit_idx = suit_order.get(c.suit, 6)
+            rank_val = int(c.rank) if c.rank.isdigit() else 0
+            return (suit_idx, rank_val, c.rank)
+        
+        sorted_hand = sorted(player.hand, key=sort_key)
         
         # 为每张牌创建按钮
-        que = getattr(player, "que_men", "")
         for card in sorted_hand:
             btn = QPushButton(str(card))
-            # 缺门牌标红
-            if card.suit == que:
-                btn.setStyleSheet("background-color: #e74c3c; color: white;")
+            # 花牌标记为特殊颜色
+            if card.suit == "花":
+                btn.setStyleSheet("background-color: #9b59b6; color: white;")
             btn.clicked.connect(lambda checked, c=card: action_callback("discard", c))
             self._hand_layout.addWidget(btn)
 
