@@ -155,6 +155,22 @@ class MainWindow(QMainWindow):
         if action_type == "pass":
             return
 
+        # 人工换三张确认
+        if action_type == "confirm_exchange_three":
+            player = self.game_state.current_player
+            selected_cards = card or []
+            if hasattr(self.game_state.rule, "exchange_three_for_player"):
+                self.game_state.rule.exchange_three_for_player(player, selected_cards, self.game_state)
+            # 为AI补齐换三张
+            if hasattr(self.game_state.rule, "exchange_three_auto_for_ai"):
+                self.game_state.rule.exchange_three_auto_for_ai(self.game_state)
+            self.log_updated.emit(f"{player.name}: 完成换三张（{len(selected_cards)}张）")
+            self.game_updated.emit()
+            self._render_player_ui()
+            if not self._timer.isActive():
+                self._timer.start()
+            return
+
         player = self.game_state.current_player
         action = Action(action_type, card, from_player=player)
         TurnHandler.execute_action(action, player, self.game_state)
@@ -199,7 +215,8 @@ class MainWindow(QMainWindow):
         """Initialize a new game with the selected rule and refresh UI."""
         if self._timer.isActive():
             self._timer.stop()
-        self.game_state = init_game(rule_name, self.players_config)
+        opts = {"auto_exchange_three": False} if rule_name == "tencent_xueliu" else {}
+        self.game_state = init_game(rule_name, self.players_config, options=opts)
         self.status_label.setText(f"当前规则: {rule_name}")
         self._refresh_labels()
         self._refresh_players()

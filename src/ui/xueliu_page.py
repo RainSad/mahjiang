@@ -21,6 +21,9 @@ class XueliuPage(RulePage):
         self._hand_layout = None
         self._actions_container = None
         self._actions_layout = None
+        # 人工换三张状态
+        self._exchange_mode = False
+        self._selected = set()
 
     def setup_ui(self, parent: QWidget):
         """初始化UI组件"""
@@ -96,7 +99,23 @@ class XueliuPage(RulePage):
             self._actions_layout.addWidget(hint_unset)
             return
         
-        # 定缺提示：若必须先打缺门牌，暂停其他动作
+        # 人工换三张入口（仅当规则关闭自动换三张且玩家未执行过）
+        auto = getattr(game_state.rule, "auto_exchange_three", True)
+        if not auto and not getattr(player, "has_exchanged_three", False):
+            enter_btn = QPushButton("进入换三张")
+            enter_btn.clicked.connect(lambda: self._enter_exchange_mode())
+            self._actions_layout.addWidget(enter_btn)
+            if self._exchange_mode:
+                confirm_btn = QPushButton(f"确认换三张（已选{len(self._selected)}）")
+                confirm_btn.setStyleSheet("background-color:#f39c12; color:white;")
+                confirm_btn.clicked.connect(lambda: action_callback("confirm_exchange_three", list(self._selected)))
+                cancel_btn = QPushButton("取消")
+                cancel_btn.clicked.connect(lambda: self._cancel_exchange_mode())
+                self._actions_layout.addWidget(confirm_btn)
+                self._actions_layout.addWidget(cancel_btn)
+            # 未定缺时仍需先定缺，但允许进入选择模式以便挑牌
+
+        # 定缺提示
         if "must_discard_que" in valid_actions:
             que = getattr(player, "que_men", "")
             hint_label = QLabel(f"必须先打出缺门({que})牌！")
@@ -141,12 +160,20 @@ class XueliuPage(RulePage):
         # 为每张牌创建按钮
         que = getattr(player, "que_men", "")
         for card in sorted_hand:
-            btn = QPushButton(str(card))
-            # 缺门牌标红
-            if card.suit == que:
-                btn.setStyleSheet("background-color: #e74c3c; color: white;")
-            btn.clicked.connect(lambda checked, c=card: action_callback("discard", c))
-            self._hand_layout.addWidget(btn)
+            # 显示名优化：使用 Card.get_display_name()
+            label = getattr(card, "get_display_name", lambda: str(card))()
+            btn = QPushButton(label)
+             # 缺门牌标红
+             if card.suit == que:
+                 btn.setStyleSheet("background-color: #e74c3c; color: white;")
+            if self._exchange_mode:
+                # 选择模式：点击切换选中状态
+                btn.clicked.connect(lambda checked, c=card: self._toggle_select(c))
+                if card in self._selected:
+                    btn.setStyleSheet("background-color:#f1c40f; color:black;")
+            else:
+                btn.clicked.connect(lambda checked, c=card: action_callback("discard", c))
+             self._hand_layout.addWidget(btn)
 
     def reset(self):
         """重置页面状态"""
@@ -165,7 +192,27 @@ class XueliuPage(RulePage):
                 w = item.widget()
                 if w:
                     w.deleteLater()
+        self._exchange_mode = False
+        self._selected = set()
 
     def get_widget(self) -> QWidget:
         """返回页面的顶层widget"""
         return self._widget
+
+    # ==== 选择模式内部方法 ====
+    def _enter_exchange_mode(self):
+        self._exchange_mode = True
+        self._selected = set()
+        if self._detail_label:
+            self._detail_label.setText("选择最多三张，点击“确认换三张”执行")
+    def _cancel_exchange_mode(self):
+        self._exchange_mode = False
+        self._selected = set()
+        if self._detail_label:
+            self._detail_label.setText("已取消换三张选择")
+    def _toggle_select(self, card):
+        if card in self._selected:
+            self._selected.remove(card)
+        else:
+            if len(self._selected) < 3:
+                self._selected.add(card)

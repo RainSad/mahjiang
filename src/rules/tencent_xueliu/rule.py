@@ -26,6 +26,7 @@ class TencentXueliuRule(BaseRule):
         self.mandatory_discard = True  # 必须有一张牌可以打出
         self.room_level = room_level  # 房间等级：普通场/富商场/尊爵场
         self.tiles_count = 108       # 牌数：万筒条108张
+        self.auto_exchange_three = True  # 是否在发牌后自动换三张（GUI可关闭）
         
         # 加载子规则
         self.hu_rules = TencentXueliuHuRules(self)
@@ -91,6 +92,55 @@ class TencentXueliuRule(BaseRule):
             # 把给出的牌放回牌墙并洗牌
             game_state.deck.extend(give)
             random.shuffle(game_state.deck)
+
+    def exchange_three_for_player(self, player, selected_cards, game_state):
+        """人工换三张：指定玩家选择的牌与牌墙交换"""
+        if not selected_cards:
+            return
+        choose = list(selected_cards)[:3]
+        # 验证与移除
+        for c in choose:
+            if c in player.hand:
+                player.hand.remove(c)
+        # 从牌墙取同等数量
+        take = []
+        for _ in choose:
+            if game_state.deck:
+                take.append(game_state.deck.pop())
+        player.hand.extend(take)
+        # 将选择的牌放回牌墙并洗牌
+        import random
+        game_state.deck.extend(choose)
+        random.shuffle(game_state.deck)
+        # 标记已执行，避免重复
+        setattr(player, "has_exchanged_three", True)
+
+    def exchange_three_auto_for_ai(self, game_state):
+        """为未执行换三张的AI自动执行换三张（沿用自动策略）"""
+        for p in game_state.players:
+            if getattr(p, "has_exchanged_three", False):
+                continue
+            if not getattr(p, "is_ai", False):
+                continue
+            # 复用自动策略的核心逻辑
+            from src.core.data.card import Card
+            suited = [c for c in p.hand if c.suit in ['万', '筒', '条']]
+            suited.sort(key=lambda c: (int(c.rank), c.suit), reverse=True)
+            give = suited[:3]
+            if not give:
+                setattr(p, "has_exchanged_three", True)
+                continue
+            for c in give:
+                p.hand.remove(c)
+            take = []
+            for _ in give:
+                if game_state.deck:
+                    take.append(game_state.deck.pop())
+            p.hand.extend(take)
+            game_state.deck.extend(give)
+            import random
+            random.shuffle(game_state.deck)
+            setattr(p, "has_exchanged_three", True)
 
     def handle_call_transfer(self, winner, shooter):
         """呼叫转移：杠上炮需将上一杠所得转给胡牌玩家"""

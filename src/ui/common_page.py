@@ -126,7 +126,8 @@ class CommonPage(RulePage):
         
         # 为每张牌创建按钮
         for card in sorted_hand:
-            btn = QPushButton(str(card))
+            label = getattr(card, "get_display_name", lambda: str(card))()
+            btn = QPushButton(label)
             # 花牌标记为特殊颜色
             if card.suit == "花":
                 btn.setStyleSheet("background-color: #9b59b6; color: white;")
