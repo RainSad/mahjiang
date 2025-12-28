@@ -80,7 +80,7 @@ class MahjongUI:
             meld_frame.pack(anchor="w")
             ttk.Label(meld_frame, text="副露:").pack(side="left")
             for meld in player.melds:
-                ttk.Label(meld_frame, text=f"{meld.type}:{[str(c) for c in meld.cards]}").pack(anchor="left")
+                ttk.Label(meld_frame, text=f"{meld.type}:{[str(c) for c in meld.cards]}").pack(anchor="w")
 
     def _on_card_click(self, player, card):
         """玩家点击手牌时，执行打牌并推进回合。"""
