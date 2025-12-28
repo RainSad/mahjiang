@@ -10,9 +10,10 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QHBoxLayout,
+    QComboBox,
 )
 
-from src.core.logic.turn_handler import TurnHandler
+from src.core.logic.turn_handler import TurnHandler, init_game
 from src.core.logic.deck_manager import DeckManager
 
 
@@ -36,6 +37,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self._central)
         self._layout = QVBoxLayout(self._central)
 
+        self.rule_selector = QComboBox()
+        self.rule_selector.addItems(["tencent_common", "tencent_xueliu"])
         self.status_label = QLabel("等待开始")
         self.deck_label = QLabel("")
         self.players_view = QTextEdit()
@@ -48,6 +51,7 @@ class MainWindow(QMainWindow):
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
 
+        self._layout.addWidget(self.rule_selector)
         self._layout.addWidget(self.start_button)
         self._layout.addWidget(self.status_label)
         self._layout.addWidget(self.deck_label)
@@ -66,6 +70,15 @@ class MainWindow(QMainWindow):
         self._timer.setInterval(200)
         self._timer.timeout.connect(self._tick)
 
+        self.players_config = [
+            {"name": "玩家", "is_ai": False},
+            {"name": "AI-南", "is_ai": True, "ai_strategy": "advanced"},
+            {"name": "AI-西", "is_ai": True, "ai_strategy": "advanced"},
+            {"name": "AI-北", "is_ai": True, "ai_strategy": "advanced"},
+        ]
+
+        self.game_state = None
+        self._reset_game(self.rule_selector.currentText())
         self._refresh_labels()
         self._refresh_players()
         self._render_hand_and_actions()
@@ -73,6 +86,8 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def start_game(self):
         """Start or resume the game loop."""
+        if not self.game_state or self.game_state.game_stage != "playing":
+            self._reset_game(self.rule_selector.currentText())
         if self._timer.isActive():
             return
         self.log_updated.emit("游戏开始")
@@ -148,6 +163,16 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def _append_log(self, message: str):
         self.log_view.append(message)
+
+    def _reset_game(self, rule_name: str):
+        """Initialize a new game with the selected rule and refresh UI."""
+        if self._timer.isActive():
+            self._timer.stop()
+        self.game_state = init_game(rule_name, self.players_config)
+        self.status_label.setText(f"当前规则: {rule_name}")
+        self._refresh_labels()
+        self._refresh_players()
+        self._render_hand_and_actions()
 
     def _refresh_players(self):
         """Render a text snapshot of all players (position/score/que)."""
