@@ -114,11 +114,15 @@ class TencentHuRules:
     
     def _check_basic_hu_condition(self, player, card) -> bool:
         """检查基本胡牌条件：将牌+四组面子"""
-        # 临时组合手牌用于检查
-        temp_hand = player.hand.copy()
+        # 临时组合手牌用于检查，花牌不参与胡牌结构
+        temp_hand = [c for c in player.hand if c.suit != '花']
         # 仅在手牌张数为 13 时补上待胡的牌，避免 14 张牌被重复添加导致判断失败
-        if card is not None and len(temp_hand) % 3 == 1:
+        if card is not None and len(temp_hand) % 3 == 1 and card.suit != '花':
             temp_hand.append(card)
+
+        # 花牌过滤后，张数必须满足 2 mod 3 才可能形成将+四面子
+        if len(temp_hand) % 3 != 2:
+            return False
         
         # 按照花色和点数排序，便于检查
         sorted_hand = self._sort_hand(temp_hand)
@@ -139,9 +143,10 @@ class TencentHuRules:
     def _sort_hand(self, hand) -> list:
         """将手牌按照花色和点数排序"""
         # 定义排序规则：万>筒>条>风>箭，点数从小到大
-        suit_order = {'万': 1, '筒': 2, '条': 3, '风': 4, '箭': 5}
+        suit_order = {'万': 1, '筒': 2, '条': 3, '风': 4, '箭': 5, '花': 6}
         rank_order = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
-                     '东': 1, '南': 2, '西': 3, '北': 4, '中': 1, '发': 2, '白': 3}
+                     '东': 1, '南': 2, '西': 3, '北': 4, '中': 1, '发': 2, '白': 3,
+                     '梅': 1, '兰': 2, '竹': 3, '菊': 4, '春': 5, '夏': 6, '秋': 7, '冬': 8}
         
         return sorted(hand, key=lambda card: (suit_order[card.suit], rank_order[card.rank]))
     
