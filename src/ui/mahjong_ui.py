@@ -86,10 +86,10 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def start_game(self):
         """Start or resume the game loop."""
-        if not self.game_state or self.game_state.game_stage != "playing":
-            self._reset_game(self.rule_selector.currentText())
+        # Always reset with the currently selected rule to honor user choice
+        self._reset_game(self.rule_selector.currentText())
         if self._timer.isActive():
-            return
+            self._timer.stop()
         self.log_updated.emit("游戏开始")
         self._timer.start()
 
