@@ -164,7 +164,7 @@ class XueliuPage(RulePage):
             label = getattr(card, "get_display_name", lambda: str(card))()
             btn = QPushButton(label)
              # 缺门牌标红
-             if card.suit == que:
+            if card.suit == que:
                  btn.setStyleSheet("background-color: #e74c3c; color: white;")
             if self._exchange_mode:
                 # 选择模式：点击切换选中状态
@@ -173,7 +173,7 @@ class XueliuPage(RulePage):
                     btn.setStyleSheet("background-color:#f1c40f; color:black;")
             else:
                 btn.clicked.connect(lambda checked, c=card: action_callback("discard", c))
-             self._hand_layout.addWidget(btn)
+            self._hand_layout.addWidget(btn)
 
     def reset(self):
         """重置页面状态"""

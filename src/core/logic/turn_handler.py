@@ -304,8 +304,14 @@ class TurnHandler:
         if action.from_player and hasattr(game_state.rule, "handle_call_transfer"):
             game_state.rule.handle_call_transfer(player, action.from_player)
 
-def init_game(rule_name: str, players_config: list):
-    """初始化游戏，并按 rule_name 选择规则实现"""
+def init_game(rule_name: str, players_config: list, options: dict | None = None):
+    """初始化游戏，并按 rule_name 选择规则实现。
+
+    options 支持：
+    - auto_exchange_three: 血流是否自动换三张（默认 True）
+    - seat_winds: 玩家座次列表（长度与玩家数一致），默认 ["东","南","西","北"]
+    - dealer_wind: 庄风，默认 seat_winds[0]
+    """
     from src.core.data.game_state import GameState
     from src.core.data.player import Player
     from src.rules.tencent_common.rule import TencentCommonRule
@@ -322,6 +328,10 @@ def init_game(rule_name: str, players_config: list):
     if rule_name not in rule_map:
         raise ValueError(f"未知规则: {rule_name}")
     game_state.rule = rule_map[rule_name]()
+    # 可选项：用于GUI控制规则行为（如血流是否自动换三张）
+    options = options or {}
+    if rule_name == "tencent_xueliu":
+        setattr(game_state.rule, "auto_exchange_three", options.get("auto_exchange_three", True))
 
     # 3. 创建玩家
     for config in players_config:
@@ -330,12 +340,23 @@ def init_game(rule_name: str, players_config: list):
             player.ai_strategy = config["ai_strategy"]  # TODO: 实现AI策略加载
         game_state.players.append(player)
 
-    # 4. 设置玩家位置和邻居关系
+    # 4. 设置玩家位置和邻居关系（支持自定义座次/庄风）
     positions = ['东', '南', '西', '北']
+    seat_winds = options.get("seat_winds") if options else None
+    if not seat_winds or len(seat_winds) != len(game_state.players):
+        seat_winds = positions[: len(game_state.players)]
+
+    dealer_wind = options.get("dealer_wind") if options else None
+    if dealer_wind is None:
+        dealer_wind = seat_winds[0]
+
+    # 更新场风为庄风，保持默认兼容性
+    game_state.wind = dealer_wind
+
     for i, player in enumerate(game_state.players):
-        player.position = positions[i]
-        player.is_dealer = (i == 0)  # 第一个玩家为庄家
-        player.men_feng = positions[i]
+        player.position = seat_winds[i]
+        player.is_dealer = (player.position == dealer_wind)
+        player.men_feng = seat_winds[i]
         player.chang_feng = game_state.wind
         player.previous_player = game_state.players[(i - 1) % len(game_state.players)]
         player.next_player = game_state.players[(i + 1) % len(game_state.players)]
@@ -344,12 +365,13 @@ def init_game(rule_name: str, players_config: list):
     # 5. 洗牌和发牌
     shuffle_and_deal(game_state)
 
-    # 5.5 血流换三张
-    if hasattr(game_state.rule, "exchange_three"):
+    # 5.5 血流换三张：默认自动，GUI可通过 options 关闭以进行人工选择
+    if hasattr(game_state.rule, "exchange_three") and getattr(game_state.rule, "auto_exchange_three", True):
         game_state.rule.exchange_three(game_state)
 
     # 6. 设置游戏阶段为进行中
-    game_state.current_player = game_state.players[0]  # 庄家先出牌
+    dealer_player = next((p for p in game_state.players if getattr(p, "is_dealer", False)), game_state.players[0])
+    game_state.current_player = dealer_player  # 庄家先出牌
     game_state.game_stage = "playing"
     game_state.first_turn = True  # 标记首轮，用于天胡/地胡判定
 
