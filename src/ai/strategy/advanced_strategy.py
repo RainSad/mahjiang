@@ -14,11 +14,21 @@ class AdvancedStrategy(BaseStrategy):
     """
     
     # 风险和番型潜力的权重
-    RISK_WEIGHT = 0.6
-    FAN_WEIGHT = 0.4
+    RISK_WEIGHT = 0.50
+    FAN_WEIGHT = 0.35
     
     # 阶段风险调整系数
     PHASE_RISK_MULT = {"early": 0.7, "mid": 1.0, "late": 1.4}
+
+    # 阶段形状偏置缩放：序盘多弃孤张，尾盘需防守灵活
+    SHAPE_PHASE_SCALE = {"early": 0.6, "mid": 1.0, "late": 0.7}
+
+    # 形状偏好：保留对子/两面搭子，轻微惩罚孤张
+    SHAPE_TRIPLET_BONUS = 0.35
+    SHAPE_PAIR_BONUS = 0.18
+    SHAPE_TWO_SIDED_BONUS = 0.08
+    SHAPE_ONE_SIDE_BONUS = 0.05
+    SHAPE_ISOLATED_PENALTY = -0.08
 
     def __init__(self, rule):
         super().__init__(rule)
@@ -75,9 +85,17 @@ class AdvancedStrategy(BaseStrategy):
             # 阶段调整风险权重
             phase_mult = self.PHASE_RISK_MULT.get(phase, 1.0)
             adjusted_risk = risk * phase_mult
+
+            # 形状偏置：保留对子/两面搭子，孤张略惩罚
+            shape_adjust = self._shape_bias(card, player)
+            # 阶段缩放形状偏置
+            shape_scale = self.SHAPE_PHASE_SCALE.get(phase, 1.0)
+            shape_adjust *= shape_scale
+            # 缺门感知调整
+            shape_adjust = self._que_aware_shape_adjust(shape_adjust, card, player, game_state)
             
             # 综合评分：风险越低越好，潜在番型越高越好
-            score = adjusted_risk * self.RISK_WEIGHT + (1 - potential) * self.FAN_WEIGHT
+            score = adjusted_risk * self.RISK_WEIGHT + (1 - potential) * self.FAN_WEIGHT + shape_adjust
             
             # 收集特征说明
             notes = self._collect_notes(bayes_result, card)
@@ -165,6 +183,54 @@ class AdvancedStrategy(BaseStrategy):
         
         return "，".join(parts) + " → 综合最优"
 
+    def _shape_bias(self, card, player) -> float:
+        """Compute a small bias to keep pairs / two-sided shapes when risk is close."""
+        if card.suit not in ("万", "筒", "条"):
+            # Honors only benefit from pair protection
+            count = sum(1 for c in player.hand if c == card)
+            return self.SHAPE_PAIR_BONUS if count >= 2 else self.SHAPE_ISOLATED_PENALTY
+
+        # Suited tiles: check pair and neighbors
+        count = sum(1 for c in player.hand if c == card)
+        has_triplet = count >= 3
+        has_pair = count >= 2
+        rank = int(card.rank) if str(card.rank).isdigit() else None
+        if rank is None:
+            if has_triplet:
+                return self.SHAPE_TRIPLET_BONUS
+            return self.SHAPE_PAIR_BONUS if has_pair else self.SHAPE_ISOLATED_PENALTY
+
+        neighbors = {rank - 1, rank + 1}
+        has_prev = any(c.suit == card.suit and str(c.rank).isdigit() and int(c.rank) == rank - 1 for c in player.hand)
+        has_next = any(c.suit == card.suit and str(c.rank).isdigit() and int(c.rank) == rank + 1 for c in player.hand)
+
+        if has_triplet:
+            return self.SHAPE_TRIPLET_BONUS
+        if has_pair:
+            return self.SHAPE_PAIR_BONUS
+        if has_prev and has_next:
+            return self.SHAPE_TWO_SIDED_BONUS
+        if has_prev or has_next:
+            return self.SHAPE_ONE_SIDE_BONUS
+        return self.SHAPE_ISOLATED_PENALTY
+
+    def _que_aware_shape_adjust(self, base_shape: float, card, player, game_state) -> float:
+        """缺门感知形状调整：自己缺门牌减少保护，对手缺门牌增加保留"""
+        # 血流定缺：自己缺门花色的牌，减少形状保护（尽快打出）
+        my_que = getattr(player, "que_men", None)
+        if my_que and card.suit == my_que:
+            return base_shape * 0.4  # 大幅削弱缺门牌的形状保护
+        
+        # 多个对手缺该花色时，该牌更安全，增加形状保留
+        opponents_que_count = sum(
+            1 for p in game_state.players
+            if p != player and getattr(p, "que_men", None) == card.suit
+        )
+        if opponents_que_count >= 2:
+            return base_shape * 1.2  # 多人缺此花色，更安全可保留
+        
+        return base_shape
+
     def _fan_potential(self, player, discard_candidate) -> float:
         """尝试用计分规则估计打出后番型潜力：
         - 将该牌视为弃掉，估算剩余手牌的番型基础得分上限。
@@ -183,11 +249,15 @@ class AdvancedStrategy(BaseStrategy):
             fans = self.score_rules._calculate_fans(temp_player, discard_candidate) if self.score_rules else 0
         except Exception:
             fans = 0
-        # 映射为0-1区间
+        # 映射为0-1区间（6档细分，适应血流指数计分）
+        if fans >= 16:
+            return 1.0   # 清一色/字一色
         if fans >= 8:
-            return 1.0
+            return 0.85  # 碰碰胡/全带幺
         if fans >= 4:
-            return 0.7
+            return 0.65  # 门前清/不求人
         if fans >= 2:
-            return 0.5
-        return 0.2
+            return 0.45  # 平胡/断幺
+        if fans >= 1:
+            return 0.25  # 基础胡
+        return 0.10

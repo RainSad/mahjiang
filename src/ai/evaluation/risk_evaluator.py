@@ -81,9 +81,10 @@ class BayesEvalResult:
 class RiskEvaluator:
     """危险牌预测模块 - 基于贝叶斯定理"""
     
-    # 阶段分界：早期 >= 60% 牌墙；中期 30-60%；尾期 < 30%
-    PHASE_EARLY_THRESHOLD = 0.60
-    PHASE_LATE_THRESHOLD = 0.30
+    # 阶段分界：基于巡数（一巡=4人各出一张牌）
+    PHASE_EARLY_ROUNDS = 5    # 前5巡（≤20张弃牌）
+    PHASE_MID_ROUNDS = 12     # 6-12巡（21-48张弃牌）
+    # 13巡后（≥49张弃牌）为尾盘
     
     # 严重度权重：胡牌最高，杠次之，碰、吃最低
     SEVERITY_WEIGHTS = {"hu": 1.0, "kong": 0.20, "pong": 0.08, "chow": 0.05}
@@ -91,6 +92,9 @@ class RiskEvaluator:
     # 庄家和尾期乘数
     DEALER_MULTIPLIER = 1.2
     LATE_PHASE_MULTIPLIER = 1.3
+
+    # 定缺花色安全乘数（对手缺该花色时进一步降低反应概率）
+    QUE_MISSING_MULT = {"hu": 0.15, "pong": 0.12, "kong": 0.10, "chow": 0.08}
     
     # 先验概率边界
     PRIORS = {
@@ -104,13 +108,22 @@ class RiskEvaluator:
     # 特征似然乘数 P(feature | claim_type)
     # 熟张/绝张降低风险；幺九/中张/连张各有不同影响
     LIKELIHOODS = {
-        "safe_seen": {"hu": 0.4, "kong": 0.6, "pong": 0.5, "chow": 0.3},
-        "last_tile": {"hu": 0.2, "kong": 0.3, "pong": 0.25, "chow": 0.15},
+        # 熟张降低风险（适度恢复以防尾盘冒进）
+        "safe_seen": {"hu": 0.40, "kong": 0.60, "pong": 0.50, "chow": 0.30},
+        # 绝张牌进一步减权（适度恢复）
+        "last_tile": {"hu": 0.15, "kong": 0.25, "pong": 0.20, "chow": 0.12},
         "terminal": {"hu": 1.2, "kong": 1.3, "pong": 1.4, "chow": 0.7},
         "middle": {"hu": 0.9, "kong": 0.8, "pong": 1.0, "chow": 1.2},
         "sequence_support": {"hu": 1.0, "kong": 0.7, "pong": 0.9, "chow": 1.4},
         "honor": {"hu": 1.3, "kong": 1.4, "pong": 1.5, "chow": 0.0},
     }
+    
+    # 形状奖励惩罚
+    SHAPE_TRIPLET_BONUS = 0.35      # 保护刻子
+    SHAPE_PAIR_BONUS = 0.18         # 保护对子
+    SHAPE_TWO_SIDED_BONUS = 0.08    # 保护两面
+    SHAPE_ONE_SIDE_BONUS = 0.05     # 保护单侧
+    SHAPE_ISOLATED_PENALTY = -0.08  # 惩罚孤张
     
     def __init__(self, rule):
         self.rule = rule
@@ -189,16 +202,18 @@ class RiskEvaluator:
         - 序盘（前5巡）：early
         - 中盘（6-12巡）：mid
         - 尾盘（13巡后）：late
-        """
-        total_tiles = getattr(self.rule, "tiles_count", 136)
-        remaining = len(game_state.deck)
-        if total_tiles == 0:
-            return "late"
         
-        ratio = remaining / total_tiles
-        if ratio >= self.PHASE_EARLY_THRESHOLD:
+        一巡 = 4人各出一张牌（4张弃牌）
+        """
+        # 计算弃牌堆中的牌数（不含副露牌）
+        discard_count = len(game_state.discard_pile)
+        
+        # 计算巡数：每4张弃牌算一巡
+        rounds = discard_count / 4.0
+        
+        if rounds <= self.PHASE_EARLY_ROUNDS:
             return "early"
-        elif ratio >= self.PHASE_LATE_THRESHOLD:
+        elif rounds <= self.PHASE_MID_ROUNDS:
             return "mid"
         else:
             return "late"
@@ -317,36 +332,34 @@ class RiskEvaluator:
         rule_variant = getattr(game_state, "rule_name", "tencent_common")
         can_chow_this_opponent = allow_chow and is_next_player and not is_honor
         
-        # 血流定缺：如果对手缺门等于该牌花色且未清缺，p_hu降低
-        que_gate = 1.0
+        # 血流定缺：如果对手缺门等于该牌花色，所有反应概率降低
+        que_mult = {"hu": 1.0, "pong": 1.0, "kong": 1.0, "chow": 1.0}
         opponent_que = getattr(opponent, "que_men", None)
-        if rule_variant == "tencent_xueliu" and opponent_que:
-            # 如果对手定缺花色和该牌花色相同，胡牌概率大幅降低
-            if opponent_que == card.suit:
-                que_gate = 0.1  # 缺门牌不太可能用来胡
+        if rule_variant == "tencent_xueliu" and opponent_que == card.suit:
+            que_mult = self.QUE_MISSING_MULT
         
         # 胡牌概率
         claim_probs.hu = self._naive_bayes_p_claim(
             features, tenpai_prior, holding_prior, "hu", remaining_count
-        ) * que_gate
+        ) * que_mult["hu"]
         
         # 碰牌概率（需要手中>=2张）
         holding_2 = self._holding_posterior(remaining_count, opponent, 2)
         claim_probs.pong = self._naive_bayes_p_claim(
             features, 0.5, holding_2, "pong", remaining_count
-        )
+        ) * que_mult["pong"]
         
         # 杠牌概率（需要手中>=3张）
         holding_3 = self._holding_posterior(remaining_count, opponent, 3)
         claim_probs.kong = self._naive_bayes_p_claim(
             features, 0.3, holding_3, "kong", remaining_count
-        )
+        ) * que_mult["kong"]
         
         # 吃牌概率（仅下家，仅序数牌）
         if can_chow_this_opponent:
             claim_probs.chow = self._naive_bayes_p_claim(
                 features, 0.4, sequence_support, "chow", remaining_count
-            )
+            ) * que_mult["chow"]
         else:
             claim_probs.chow = 0.0
         
@@ -542,7 +555,7 @@ class RiskEvaluator:
         
         # 已绝牌风险极低
         if features.is_exhausted:
-            likelihood *= 0.05
+            likelihood *= 0.02
         
         # 字牌
         if features.is_honor:
